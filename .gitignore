@@ -1,0 +1,40 @@
+# =========================
+# Build files
+# =========================
+build/
+build-*/
+cmake-build-*/
+
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# =========================
+# Qt Creator
+# =========================
+*.user
+*.user.*
+*.autosave
+.qtc_clangd/
+
+# =========================
+# Compiled files
+# =========================
+*.o
+*.obj
+*.exe
+*.dll
+*.a
+*.lib
+
+# =========================
+# Runtime files
+# =========================
+*.log
+
+# =========================
+# Operating system
+# =========================
+.DS_Store
+Thumbs.db
