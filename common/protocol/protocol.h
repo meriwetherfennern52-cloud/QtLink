@@ -21,6 +21,13 @@ constexpr quint8 VERSION = 1;
 constexpr qsizetype HEADER_SIZE=11;
 
 /**
+ * @brief 单个 QtLink Packet 允许的最大消息体大小。
+ *
+ * 用于防止异常或恶意长度字段导致接收缓冲区无限增长。
+ */
+constexpr quint32 MAX_BODY_SIZE=8*1024*1024;
+
+/**
  * @brief QtLink 消息类型。
  *
  * 底层类型固定为 quint16，因此在协议中占 2 字节。

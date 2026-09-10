@@ -3,6 +3,7 @@
 
 #include <QObject>
 // #include <QTcpSocket>
+#include <QByteArray>
 class QTcpSocket; //前置声明，.cpp里再写↑，减少头文件之间的耦合和不必要的编译依赖
 
 /**
@@ -56,8 +57,18 @@ signals:
      */
     void connectionError(const QString &message);
 
+private slots:
+    /**
+     * @brief 处理套接字可读事件。
+     *
+     * 读取当前已到达的 TCP 字节数据，并追加到接收缓冲区，
+     * 后续再从缓冲区中按 QtLink 协议解析完整数据包。
+     */
+    void handleReadyRead();
+
 private:
     QTcpSocket*m_socket;
+    QByteArray m_receiveBuffer;
 };
 
 #endif // CONNECTIONMANAGER_H

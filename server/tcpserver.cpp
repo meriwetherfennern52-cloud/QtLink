@@ -1,7 +1,9 @@
 #include "tcpserver.h"
 
+#include "packetcodec.h"
 #include <QTcpServer>
 #include <QTcpSocket>
+#include<QTimer>
 
 TcpServer::TcpServer(QObject *parent)
     : QObject{parent},m_server(new QTcpServer(this))
@@ -52,5 +54,32 @@ void TcpServer::handleNewConnection()
             emit logMessage("Client disconnected");
             socket->deleteLater();
         });
+        Protocol::Packet packet1;
+        packet1.type = Protocol::MessageType::TextMessage;
+        packet1.body = QByteArray("hello");
+
+        Protocol::Packet packet2;
+        packet2.type = Protocol::MessageType::TextMessage;
+        packet2.body = QByteArray("world");
+
+        QByteArray data1 = Protocol::PacketCodec::encode(packet1);
+        QByteArray data2 = Protocol::PacketCodec::encode(packet2);
+
+        QByteArray firstPart =
+            data1 + data2.left(5);
+
+        QByteArray secondPart =
+            data2.mid(5);
+
+        socket->write(firstPart);
+
+        QTimer::singleShot(
+            500,
+            socket,
+            [socket, secondPart]()
+            {
+                socket->write(secondPart);
+            }
+            );
     }
 }
