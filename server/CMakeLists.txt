@@ -44,6 +44,16 @@ else()
     endif()
 endif()
 
+target_sources(server PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/protocol.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packet.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetcodec.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetcodec.cpp
+)
+
+target_include_directories(server PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol
+)
 target_link_libraries(server PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
 target_link_libraries(server PRIVATE Qt${QT_VERSION_MAJOR}::Network)
 
