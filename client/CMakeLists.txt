@@ -51,6 +51,8 @@ target_sources(client PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetcodec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetparser.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetparser.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/textmessagecodec.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/textmessagecodec.cpp
 )
 
 target_include_directories(client PRIVATE

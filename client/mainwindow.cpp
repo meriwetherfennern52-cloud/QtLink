@@ -79,6 +79,6 @@ void MainWindow::on_sendBtn_clicked()
 
 void MainWindow::handleTextMessageReceived(const QString &text)
 {
-    ui->messageDisplay->appendPlainText(QString("Server: %1").arg(text));
+    ui->messageDisplay->appendPlainText(QString("Peer: %1").arg(text));
 }
 

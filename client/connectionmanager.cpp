@@ -4,6 +4,7 @@
 #include "packetparser.h"
 #include<QDataStream>
 #include"packetcodec.h"
+#include"textmessagecodec.h"
 
 ConnectionManager::ConnectionManager(QObject *parent)
     : QObject{parent},m_socket(new QTcpSocket(this))
@@ -36,9 +37,11 @@ bool ConnectionManager::sendTextMessage(const QString &text)
     if(text.trimmed().isEmpty()){
         return false;
     }
+
     Protocol::Packet packet;
     packet.type=Protocol::MessageType::TextMessage;
-    packet.body=text.toUtf8();
+    packet.body=Protocol::textmessagecodec::encode(text);
+
     if(packet.body.size()>static_cast<qsizetype>(Protocol::MAX_BODY_SIZE)){
         emit connectionError("Message is too large");
         return false;
@@ -48,6 +51,7 @@ bool ConnectionManager::sendTextMessage(const QString &text)
         emit connectionError(m_socket->errorString());
         return false;
     }
+
     return true;
 }
 
@@ -73,7 +77,13 @@ void ConnectionManager::handleReadyRead()
             break;
         }
         if(packet.type==Protocol::MessageType::TextMessage){
-            emit textMessageReceived(QString::fromUtf8(packet.body));
+
+            QString content;
+            if(!Protocol::textmessagecodec::decode(packet.body,content)){
+                emit connectionError("Invalid text message");
+                continue;
+            }
+            emit textMessageReceived(content);
         }
     }
 }

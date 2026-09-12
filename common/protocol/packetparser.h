@@ -21,6 +21,11 @@ enum class ParseResult{
  */
 class PacketParser
 {
+    /**
+    * @brief 工具类不允许实例化。
+     */
+    PacketParser() = delete;
+
 public:
     /**
      * @brief 尝试从接收缓冲区解析一个完整 Packet。

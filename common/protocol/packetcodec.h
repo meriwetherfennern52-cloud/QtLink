@@ -10,6 +10,12 @@ namespace Protocol{
  */
 class PacketCodec{
 public:
+
+    /**
+     * @brief 工具类不允许实例化。
+     */
+    PacketCodec() = delete;
+
     /**
      * @brief 将 Packet 序列化为可发送的字节序列。
      */

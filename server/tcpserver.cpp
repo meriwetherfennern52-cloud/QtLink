@@ -5,6 +5,7 @@
 #include <QTcpSocket>
 #include<QTimer>
 #include"packetcodec.h"
+#include"textmessagecodec.h"
 
 TcpServer::TcpServer(QObject *parent)
     : QObject{parent},m_server(new QTcpServer(this))
@@ -68,6 +69,7 @@ void TcpServer::handleClientReadyRead(QTcpSocket *socket)
     QByteArray &receiveBuffer=m_receiveBuffers[socket];
     QByteArray newData=socket->readAll();
     receiveBuffer.append(newData);
+
     while(true){
         Protocol::Packet packet;
         Protocol::ParseResult result=Protocol::PacketParser::tryParse(receiveBuffer,packet);
@@ -80,8 +82,22 @@ void TcpServer::handleClientReadyRead(QTcpSocket *socket)
             socket->disconnectFromHost();
             break;
         }
-        emit logMessage(QString("Received message:%1").arg(QString::fromUtf8(packet.body)));
-        QByteArray response=Protocol::PacketCodec::encode(packet);
-        socket->write(response);
+
+        QString content;
+        if(!Protocol::textmessagecodec::decode(packet.body,content)){
+            emit logMessage("Invalid text message");
+            continue;
+        }
+        emit logMessage(QString("Received message: %1").arg(content));
+
+        QByteArray data=Protocol::PacketCodec::encode(packet);
+        for(QTcpSocket*client:m_clients){
+            if(client==socket){
+                continue;
+            }
+            if(client->state()==QAbstractSocket::ConnectedState){
+                client->write(data);
+            }
+        }
     }
 }
