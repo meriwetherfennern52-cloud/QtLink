@@ -1,9 +1,10 @@
 #include "tcpserver.h"
 
-#include "packetcodec.h"
+#include "packetparser.h"
 #include <QTcpServer>
 #include <QTcpSocket>
 #include<QTimer>
+#include"packetcodec.h"
 
 TcpServer::TcpServer(QObject *parent)
     : QObject{parent},m_server(new QTcpServer(this))
@@ -43,43 +44,44 @@ void TcpServer::handleNewConnection()
         if(!socket){
             continue;
         }
+        connect(socket,&QTcpSocket::readyRead,this,[socket,this](){
+            handleClientReadyRead(socket);
+        });
         m_clients.append(socket);
+        m_receiveBuffers.insert(socket, QByteArray());
         emit clientCountChanged(m_clients.size());
         emit logMessage(QString("Client connected:%1:%2")
                             .arg(socket->peerAddress().toString())
                             .arg(socket->peerPort()));
         connect(socket,&QTcpSocket::disconnected,this,[this,socket](){
             m_clients.removeOne(socket);
+            m_receiveBuffers.remove(socket);
             emit clientCountChanged(m_clients.size());
             emit logMessage("Client disconnected");
             socket->deleteLater();
         });
-        Protocol::Packet packet1;
-        packet1.type = Protocol::MessageType::TextMessage;
-        packet1.body = QByteArray("hello");
+    }
+}
 
-        Protocol::Packet packet2;
-        packet2.type = Protocol::MessageType::TextMessage;
-        packet2.body = QByteArray("world");
-
-        QByteArray data1 = Protocol::PacketCodec::encode(packet1);
-        QByteArray data2 = Protocol::PacketCodec::encode(packet2);
-
-        QByteArray firstPart =
-            data1 + data2.left(5);
-
-        QByteArray secondPart =
-            data2.mid(5);
-
-        socket->write(firstPart);
-
-        QTimer::singleShot(
-            500,
-            socket,
-            [socket, secondPart]()
-            {
-                socket->write(secondPart);
-            }
-            );
+void TcpServer::handleClientReadyRead(QTcpSocket *socket)
+{
+    QByteArray &receiveBuffer=m_receiveBuffers[socket];
+    QByteArray newData=socket->readAll();
+    receiveBuffer.append(newData);
+    while(true){
+        Protocol::Packet packet;
+        Protocol::ParseResult result=Protocol::PacketParser::tryParse(receiveBuffer,packet);
+        if(result==Protocol::ParseResult::NeedMoreData){
+            break;
+        }
+        if(result==Protocol::ParseResult::InvalidData){
+            emit logMessage("Received invalid QtLink packet");
+            receiveBuffer.clear();
+            socket->disconnectFromHost();
+            break;
+        }
+        emit logMessage(QString("Received message:%1").arg(QString::fromUtf8(packet.body)));
+        QByteArray response=Protocol::PacketCodec::encode(packet);
+        socket->write(response);
     }
 }

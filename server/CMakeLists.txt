@@ -49,6 +49,8 @@ target_sources(server PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packet.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetcodec.h
     ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetcodec.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetparser.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetparser.cpp
 )
 
 target_include_directories(server PRIVATE

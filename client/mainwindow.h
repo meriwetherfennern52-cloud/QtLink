@@ -37,6 +37,17 @@ private slots:
 
     void handleConnectionError(const QString &message);
 
+    void on_sendBtn_clicked();
+
+    /**
+    * @brief 处理接收到的文本消息。
+    *
+    * 将 ConnectionManager 已解析完成的文本消息显示到聊天区域。
+    *
+    * @param text 接收到的文本内容。
+    */
+    void handleTextMessageReceived(const QString &text);
+
 private:
     Ui::MainWindow *ui;
     ConnectionManager*m_connectionManager;

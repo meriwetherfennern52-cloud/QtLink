@@ -2,6 +2,8 @@
 #define TCPSERVER_H
 
 #include <QObject>
+#include<QHash>
+#include<QByteArray>
 class QTcpServer;
 class QTcpSocket;
 /**
@@ -38,11 +40,28 @@ signals:
     void serverError(const QString &message);
 
 private slots:
-    void handleNewConnection();
+    /**
+    * @brief 处理新的客户端连接。
+    *
+    * 获取 QTcpServer 中等待处理的客户端连接，
+    * 保存客户端套接字并建立数据接收、断开等信号连接。
+    */
+       void handleNewConnection();
+
+    /**
+    * @brief 处理指定客户端套接字的可读事件。
+    *
+    * 将该客户端当前到达的 TCP 字节追加到其独立接收缓冲区，
+    * 并从缓冲区中解析完整的 QtLink 数据包。
+    *
+    * @param socket 产生可读数据的客户端套接字。
+    */
+    void handleClientReadyRead(QTcpSocket*socket);
 
 private:
     QTcpServer *m_server;
     QList<QTcpSocket*>m_clients;
+    QHash<QTcpSocket*,QByteArray>m_receiveBuffers;
 };
 
 #endif // TCPSERVER_H

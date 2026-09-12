@@ -40,6 +40,16 @@ public:
      */
     void disconnectFromServer();
 
+    /**
+    * @brief 向当前已连接的服务器发送文本消息。
+    *
+    * 将文本转换为 UTF-8 字节，封装为 QtLink TextMessage 数据包后发送。
+    *
+    * @param text 要发送的文本内容。
+    * @return 成功提交给套接字发送时返回 true，否则返回 false。
+    */
+    bool sendTextMessage(const QString &text);
+
 signals:
     /**
      * @brief TCP 连接建立成功。
@@ -57,6 +67,13 @@ signals:
      */
     void connectionError(const QString &message);
 
+    /**
+    * @brief 通知上层收到一条文本消息。
+    *
+    * @param text 已从 QtLink TextMessage 解码得到的文本内容。
+    */
+    void textMessageReceived(const QString &text);
+
 private slots:
     /**
      * @brief 处理套接字可读事件。
@@ -65,6 +82,13 @@ private slots:
      * 后续再从缓冲区中按 QtLink 协议解析完整数据包。
      */
     void handleReadyRead();
+
+    /**
+     * @brief 处理 TCP 连接断开事件。
+     *
+     * 清理当前连接遗留的接收缓冲区，并通知上层连接已断开。
+     */
+    void handleSocketDisconnected();
 
 private:
     QTcpSocket*m_socket;
