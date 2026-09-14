@@ -20,7 +20,7 @@ ConnectionManager::ConnectionManager(QObject *parent)
 void ConnectionManager::connectToServer(const QString &host, quint16 port)
 {
     m_receiveBuffer.clear();
-    m_socket->connectToHost(QHostAddress(host),port);
+    m_socket->connectToHost(host,port);
 }
 
 void ConnectionManager::disconnectFromServer()
@@ -40,7 +40,7 @@ bool ConnectionManager::sendTextMessage(const QString &text)
 
     Protocol::Packet packet;
     packet.type=Protocol::MessageType::TextMessage;
-    packet.body=Protocol::textmessagecodec::encode(text);
+    packet.body=Protocol::TextMessageCodec::encode(text);
 
     if(packet.body.size()>static_cast<qsizetype>(Protocol::MAX_BODY_SIZE)){
         emit connectionError("Message is too large");
@@ -79,7 +79,7 @@ void ConnectionManager::handleReadyRead()
         if(packet.type==Protocol::MessageType::TextMessage){
 
             QString content;
-            if(!Protocol::textmessagecodec::decode(packet.body,content)){
+            if(!Protocol::TextMessageCodec::decode(packet.body,content)){
                 emit connectionError("Invalid text message");
                 continue;
             }

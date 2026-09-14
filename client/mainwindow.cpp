@@ -24,7 +24,8 @@ void MainWindow::on_connectBtn_clicked()
     const QString host=ui->ipLineEdit->text().trimmed();
     const quint16 port=static_cast<quint16>(ui->portSpinBox->value());
     if(host.isEmpty()){
-        ui->statusbar->showMessage("Host connot be empty");
+        ui->statusbar->showMessage("Host cannot be empty");
+        return;
     }
     ui->statusbar->showMessage("Connecting...");
     ui->connectBtn->setDisabled(true);

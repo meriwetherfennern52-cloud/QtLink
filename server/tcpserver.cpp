@@ -3,7 +3,6 @@
 #include "packetparser.h"
 #include <QTcpServer>
 #include <QTcpSocket>
-#include<QTimer>
 #include"packetcodec.h"
 #include"textmessagecodec.h"
 
@@ -28,11 +27,11 @@ bool TcpServer::startServer(quint16 port)
 
 void TcpServer::stopServer()
 {
-    if(!m_server->isListening()){
-        return;
+    if(m_server->isListening()){
+        m_server->close();
     }
-    m_server->close();
-    for(QTcpSocket*socket:m_clients){
+    const auto sockets=m_sessions.keys();
+    for(QTcpSocket*socket:sockets){
         socket->disconnectFromHost();
     }
     emit logMessage("Server stopped");
@@ -45,20 +44,24 @@ void TcpServer::handleNewConnection()
         if(!socket){
             continue;
         }
+
+        const quint32 clientId=m_nextClientId++;
+        ClientSession session;
+        session.clientId=clientId;
+        m_sessions.insert(socket,session);
         connect(socket,&QTcpSocket::readyRead,this,[socket,this](){
             handleClientReadyRead(socket);
         });
-        m_clients.append(socket);
-        m_receiveBuffers.insert(socket, QByteArray());
-        emit clientCountChanged(m_clients.size());
-        emit logMessage(QString("Client connected:%1:%2")
+
+        emit clientCountChanged(m_sessions.size());
+        emit logMessage(QString("Client %1 connected:%2:%3")
+                            .arg(clientId)
                             .arg(socket->peerAddress().toString())
                             .arg(socket->peerPort()));
-        connect(socket,&QTcpSocket::disconnected,this,[this,socket](){
-            m_clients.removeOne(socket);
-            m_receiveBuffers.remove(socket);
-            emit clientCountChanged(m_clients.size());
-            emit logMessage("Client disconnected");
+        connect(socket,&QTcpSocket::disconnected,this,[this,socket,clientId](){
+            m_sessions.remove(socket);
+            emit clientCountChanged(m_sessions.size());
+            emit logMessage(QString("Client %1 disconnected").arg(clientId));
             socket->deleteLater();
         });
     }
@@ -66,7 +69,13 @@ void TcpServer::handleNewConnection()
 
 void TcpServer::handleClientReadyRead(QTcpSocket *socket)
 {
-    QByteArray &receiveBuffer=m_receiveBuffers[socket];
+    auto it=m_sessions.find(socket);
+    if(it==m_sessions.end()){
+        emit logMessage("Received data from unknown client");
+        return;
+    }
+    ClientSession &session=it.value();
+    QByteArray &receiveBuffer=session.receiveBuffer;
     QByteArray newData=socket->readAll();
     receiveBuffer.append(newData);
 
@@ -84,14 +93,15 @@ void TcpServer::handleClientReadyRead(QTcpSocket *socket)
         }
 
         QString content;
-        if(!Protocol::textmessagecodec::decode(packet.body,content)){
+        if(!Protocol::TextMessageCodec::decode(packet.body,content)){
             emit logMessage("Invalid text message");
             continue;
         }
         emit logMessage(QString("Received message: %1").arg(content));
 
         QByteArray data=Protocol::PacketCodec::encode(packet);
-        for(QTcpSocket*client:m_clients){
+        const auto sockets=m_sessions.keys();
+        for(QTcpSocket*client:sockets){
             if(client==socket){
                 continue;
             }

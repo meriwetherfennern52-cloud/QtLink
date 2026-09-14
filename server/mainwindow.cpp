@@ -4,7 +4,7 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
-    , ui(new Ui::MainWindow),m_tcpServer(new TcpServer)
+    , ui(new Ui::MainWindow),m_tcpServer(new TcpServer(this))
 {
     ui->setupUi(this);
 

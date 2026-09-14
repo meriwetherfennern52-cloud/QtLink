@@ -41,13 +41,12 @@ Protocol::ParseResult Protocol::PacketParser::tryParse(QByteArray &buffer, Packe
     }
 
     qsizetype packetSize=HEADER_SIZE+static_cast<qsizetype>(bodyLength);
-    if(buffer<packetSize){
+    if(buffer.size()<packetSize){
         return ParseResult::NeedMoreData;
     }
     QByteArray packetData=buffer.left(packetSize);
-    if(PacketCodec::decode(packetData,packet)){
-        buffer.clear();
-        return ParseResult::Success;
+    if(!PacketCodec::decode(packetData,packet)){
+        return ParseResult::InvalidData;
     }
     buffer.remove(0,packetSize);
     return ParseResult::Success;

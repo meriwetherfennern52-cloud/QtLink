@@ -7,12 +7,12 @@
 class QTcpServer;
 class QTcpSocket;
 /**
- * @brief QtLink 服务端 TCP 连接管理类。
+ * @brief QtLink 服务端 TCP 连接与消息转发管理类。
  *
- * 负责监听 TCP 端口、接受客户端连接、维护当前客户端连接，
- * 并通过信号向 UI 层通知服务器状态、在线人数和运行日志。
- *
- * 当前不负责应用层协议解析和消息转发。
+ * 负责监听 TCP 端口、接受和维护客户端连接，
+ * 管理各客户端连接会话及接收缓冲区，
+ * 解析 QtLink 数据包并完成基础消息转发，
+ * 同时通过信号向 UI 层通知服务器状态、在线人数和运行日志。
  */
 class TcpServer : public QObject
 {
@@ -59,9 +59,13 @@ private slots:
     void handleClientReadyRead(QTcpSocket*socket);
 
 private:
+    struct ClientSession{
+        quint32 clientId{0};
+        QByteArray receiveBuffer;
+    };
     QTcpServer *m_server;
-    QList<QTcpSocket*>m_clients;
-    QHash<QTcpSocket*,QByteArray>m_receiveBuffers;
+    QHash<QTcpSocket*,ClientSession>m_sessions;
+    quint32 m_nextClientId{1};
 };
 
 #endif // TCPSERVER_H
