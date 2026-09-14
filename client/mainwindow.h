@@ -40,13 +40,12 @@ private slots:
     void on_sendBtn_clicked();
 
     /**
-    * @brief 处理接收到的文本消息。
+    * @brief 处理服务器下发的文本消息。
     *
-    * 将 ConnectionManager 已解析完成的文本消息显示到聊天区域。
-    *
+    * @param senderId 消息发送者的连接 ID。
     * @param text 接收到的文本内容。
     */
-    void handleTextMessageReceived(const QString &text);
+    void handleTextMessageReceived(const quint32 senderId,const QString &text);
 
 private:
     Ui::MainWindow *ui;

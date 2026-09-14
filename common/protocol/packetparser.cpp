@@ -28,8 +28,7 @@ Protocol::ParseResult Protocol::PacketParser::tryParse(QByteArray &buffer, Packe
     }
 
     stream >> typeValue;
-    if (typeValue !=
-        static_cast<quint16>(MessageType::TextMessage))
+    if (!isValidMessageType(typeValue))
     {
         return ParseResult::InvalidData;
     }

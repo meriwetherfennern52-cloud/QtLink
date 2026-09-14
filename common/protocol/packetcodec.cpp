@@ -41,7 +41,7 @@ bool PacketCodec::decode(const QByteArray &data, Packet &packet)
         return false;
     }
     stream>>typeValue;
-    if(typeValue!=static_cast<quint16>(MessageType::TextMessage)){
+    if(!isValidMessageType(typeValue)){
         return false;
     }
     stream>>bodyLength;

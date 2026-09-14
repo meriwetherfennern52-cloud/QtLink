@@ -11,6 +11,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_connectionManager,&ConnectionManager::disconnected,this,&MainWindow::handleDisconnected);
     connect(m_connectionManager,&ConnectionManager::connectionError,this,&MainWindow::handleConnectionError);
     ui->statusbar->showMessage("Disconnected");
+    connect(m_connectionManager,
+            &ConnectionManager::operationError,
+            this,
+            [this](const QString &message)
+            {
+                ui->statusbar->showMessage(message);
+            });
     connect(m_connectionManager,&ConnectionManager::textMessageReceived,this,&MainWindow::handleTextMessageReceived);
 }
 
@@ -78,8 +85,8 @@ void MainWindow::on_sendBtn_clicked()
     }
 }
 
-void MainWindow::handleTextMessageReceived(const QString &text)
+void MainWindow::handleTextMessageReceived(const quint32 senderId,const QString &text)
 {
-    ui->messageDisplay->appendPlainText(QString("Peer: %1").arg(text));
+    ui->messageDisplay->appendPlainText(QString("Client%1: %2").arg(senderId).arg(text));
 }
 

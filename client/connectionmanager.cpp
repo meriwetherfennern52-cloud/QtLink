@@ -19,6 +19,10 @@ ConnectionManager::ConnectionManager(QObject *parent)
 
 void ConnectionManager::connectToServer(const QString &host, quint16 port)
 {
+    if(m_socket->state()!=QAbstractSocket::UnconnectedState){
+        emit connectionError("Connection is already active");
+        return;
+    }
     m_receiveBuffer.clear();
     m_socket->connectToHost(host,port);
 }
@@ -31,7 +35,7 @@ void ConnectionManager::disconnectFromServer()
 bool ConnectionManager::sendTextMessage(const QString &text)
 {
     if(m_socket->state()!=QAbstractSocket::ConnectedState){
-        emit connectionError("Cannot send message:not connected to server.");
+        emit operationError("Cannot send message:not connected to server.");
         return false;
     }
     if(text.trimmed().isEmpty()){
@@ -39,16 +43,16 @@ bool ConnectionManager::sendTextMessage(const QString &text)
     }
 
     Protocol::Packet packet;
-    packet.type=Protocol::MessageType::TextMessage;
-    packet.body=Protocol::TextMessageCodec::encode(text);
+    packet.type=Protocol::MessageType::TextSendRequest;
+    packet.body=Protocol::TextMessageCodec::encodeSendRequest(text);
 
     if(packet.body.size()>static_cast<qsizetype>(Protocol::MAX_BODY_SIZE)){
-        emit connectionError("Message is too large");
+        emit operationError("Message is too large");
         return false;
     }
     QByteArray data=Protocol::PacketCodec::encode(packet);
     if(m_socket->write(data)<0){
-        emit connectionError(m_socket->errorString());
+        emit operationError(m_socket->errorString());
         return false;
     }
 
@@ -71,20 +75,22 @@ void ConnectionManager::handleReadyRead()
             break;
         }
         if(result==Protocol::ParseResult::InvalidData){
-            emit connectionError("Invalid QtLink packet");
+            emit operationError("Invalid QtLink packet");
             m_receiveBuffer.clear();
             disconnectFromServer();
             break;
         }
-        if(packet.type==Protocol::MessageType::TextMessage){
-
-            QString content;
-            if(!Protocol::TextMessageCodec::decode(packet.body,content)){
-                emit connectionError("Invalid text message");
-                continue;
-            }
-            emit textMessageReceived(content);
+        if(packet.type!=Protocol::MessageType::TextMessage){
+            emit operationError("Received unexpected message type from server.");
+            continue;
         }
+        quint32 senderId=0;
+        QString content;
+        if(!Protocol::TextMessageCodec::decodeTextMessage(packet.body,senderId,content)){
+            emit operationError("Invalid text message");
+            continue;
+        }
+        emit textMessageReceived(senderId,content);
     }
 }
 

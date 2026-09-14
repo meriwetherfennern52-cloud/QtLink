@@ -3,8 +3,8 @@
 #include "packetparser.h"
 #include <QTcpServer>
 #include <QTcpSocket>
-#include"packetcodec.h"
 #include"textmessagecodec.h"
+#include"packetcodec.h"
 
 TcpServer::TcpServer(QObject *parent)
     : QObject{parent},m_server(new QTcpServer(this))
@@ -92,14 +92,25 @@ void TcpServer::handleClientReadyRead(QTcpSocket *socket)
             break;
         }
 
+        if(packet.type!=Protocol::MessageType::TextSendRequest){
+            emit logMessage(QString("Client%1 sent an unexpected message type").arg(session.clientId));
+            receiveBuffer.clear();
+            socket->disconnectFromHost();
+            break;
+        }
         QString content;
-        if(!Protocol::TextMessageCodec::decode(packet.body,content)){
-            emit logMessage("Invalid text message");
+        if(!Protocol::TextMessageCodec::decodeSendRequest(packet.body,content)){
+            emit logMessage(QString("Client%1 sent an invalid text request").arg(session.clientId));
             continue;
         }
-        emit logMessage(QString("Received message: %1").arg(content));
 
-        QByteArray data=Protocol::PacketCodec::encode(packet);
+        Protocol::Packet outgoingPacket;
+        const quint32 senderId=session.clientId;
+        emit logMessage(QString("Client %1: %2").arg(senderId).arg(content));
+        outgoingPacket.type=Protocol::MessageType::TextMessage;
+        outgoingPacket.body=Protocol::TextMessageCodec::encodeTextMessage(senderId,content);
+        QByteArray data=Protocol::PacketCodec::encode(outgoingPacket);
+
         const auto sockets=m_sessions.keys();
         for(QTcpSocket*client:sockets){
             if(client==socket){

@@ -62,17 +62,26 @@ signals:
     void disconnected();
 
     /**
-     * @brief 网络连接发生错误。
-     * @param message 可供上层显示的错误信息。
-     */
+    * @brief 通知上层连接建立或连接过程发生错误。
+    *
+    * @param message 错误描述。
+    */
     void connectionError(const QString &message);
 
     /**
-    * @brief 通知上层收到一条文本消息。
+    * @brief 通知上层发生非连接类运行错误。
     *
-    * @param text 已从 QtLink TextMessage 解码得到的文本内容。
+    * @param message 错误描述。
     */
-    void textMessageReceived(const QString &text);
+    void operationError(const QString &message);
+
+    /**
+    * @brief 通知上层收到一条服务器下发的文本消息。
+    *
+    * @param senderId 消息发送者的连接 ID。
+    * @param text 文本消息内容。
+    */
+    void textMessageReceived(const quint32 senderId,const QString &text);
 
 private slots:
     /**
