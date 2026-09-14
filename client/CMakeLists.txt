@@ -44,22 +44,12 @@ else()
         )
     endif()
 endif()
-target_sources(client PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/protocol.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packet.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetcodec.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetcodec.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetparser.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/packetparser.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/textmessagecodec.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol/textmessagecodec.cpp
-)
 
-target_include_directories(client PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../common/protocol
+target_link_libraries(client PRIVATE
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::Network
+    qtlink_protocol
 )
-target_link_libraries(client PRIVATE Qt${QT_VERSION_MAJOR}::Widgets)
-target_link_libraries(client PRIVATE Qt${QT_VERSION_MAJOR}::Network)
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
 # If you are developing for iOS or macOS you should consider setting an
