@@ -1,6 +1,8 @@
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
+#include "databasemanager.h"
+
 #include <QMainWindow>
 
 
@@ -23,7 +25,13 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    explicit MainWindow(QWidget *parent = nullptr);
+    /**
+    * @brief 创建客户端主窗口。
+    *
+    * @param databasePath SQLite 数据库文件路径。
+    * @param parent 父对象。
+    */
+    explicit MainWindow(const QString &databasePath,QWidget *parent = nullptr);
     ~MainWindow() override;
 
 private slots:
@@ -50,5 +58,6 @@ private slots:
 private:
     Ui::MainWindow *ui;
     ConnectionManager*m_connectionManager;
+    DatabaseManager m_databaseManager;
 };
 #endif // MAINWINDOW_H
