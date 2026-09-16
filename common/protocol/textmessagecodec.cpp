@@ -1,16 +1,19 @@
 #include "textmessagecodec.h"
 #include<QJsonDocument>
 #include<QJsonObject>
+#include <limits>
 
-QByteArray Protocol::TextMessageCodec::encodeSendRequest(const QString &content)
+QByteArray Protocol::TextMessageCodec::encodeSendRequest(quint32 receiverId,const QString &content)
 {
     QJsonObject jsonObject;
     jsonObject["content"]=content;
+    jsonObject["receiverId"]=static_cast<qint64>(receiverId);
+
     QJsonDocument jsonDocument(jsonObject);
     return jsonDocument.toJson(QJsonDocument::Compact);
 }
 
-bool Protocol::TextMessageCodec::decodeSendRequest(const QByteArray &data, QString &content)
+bool Protocol::TextMessageCodec::decodeSendRequest(const QByteArray &data,quint32 &receiverId, QString &content)
 {
     QJsonParseError jsonError;
     QJsonDocument jsonDocument=QJsonDocument::fromJson(data,&jsonError);
@@ -18,10 +21,20 @@ bool Protocol::TextMessageCodec::decodeSendRequest(const QByteArray &data, QStri
         return false;
     }
     QJsonObject jsonObject=jsonDocument.object();
+    const QJsonValue receiverIdValue=jsonObject.value("receiverId");
     QJsonValue contentValue=jsonObject.value("content");
-    if(!contentValue.isString()){
+    if(!contentValue.isString()||!receiverIdValue.isDouble()){
         return false;
     }
+    const qint64 parsedReceiverId=receiverIdValue.toInteger(-1);
+    if (parsedReceiverId <= 0
+        || parsedReceiverId >
+               static_cast<qint64>(
+                   std::numeric_limits<quint32>::max()))
+    {
+        return false;
+    }
+    receiverId=static_cast<quint32>(parsedReceiverId);
     content=contentValue.toString();
     return true;
 }

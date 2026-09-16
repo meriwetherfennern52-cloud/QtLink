@@ -18,7 +18,7 @@ MainWindow::MainWindow(const QString &databasePath,QWidget *parent)
     }
     else{
         QList<MessageRecord>messages;
-        if(!m_databaseManager.loadMessage(messages,databaseError)){
+        if(!m_databaseManager.loadMessages(messages,databaseError)){
             ui->statusbar->showMessage(
                 QStringLiteral("Failed to load message history:%1").arg(databaseError));
         }else{
@@ -47,6 +47,13 @@ MainWindow::MainWindow(const QString &databasePath,QWidget *parent)
                 ui->statusbar->showMessage(message);
             });
     connect(m_connectionManager,&ConnectionManager::textMessageReceived,this,&MainWindow::handleTextMessageReceived);
+    connect(m_connectionManager,
+            &ConnectionManager::onlineClientListReceived,this,
+            &MainWindow::handleOnlineClientListReceived);
+    connect(ui->receiverComboBox,&QComboBox::currentIndexChanged,this,
+            [this](int index){
+                ui->sendBtn->setEnabled(true);
+    });
 }
 
 MainWindow::~MainWindow()
@@ -81,7 +88,8 @@ void MainWindow::handleConnected()
     ui->statusbar->showMessage("Connected");
     ui->disconnectBtn->setEnabled(true);
     ui->connectBtn->setDisabled(true);
-    ui->sendBtn->setEnabled(true);
+    ui->sendBtn->setEnabled(false);
+    ui->receiverComboBox->setEnabled(true);
 }
 
 void MainWindow::handleDisconnected()
@@ -90,6 +98,8 @@ void MainWindow::handleDisconnected()
     ui->connectBtn->setEnabled(true);
     ui->disconnectBtn->setDisabled(true);
     ui->sendBtn->setDisabled(true);
+    ui->receiverComboBox->clear();
+    ui->receiverComboBox->setDisabled(true);
 }
 
 void MainWindow::handleConnectionError(const QString &message)
@@ -107,7 +117,14 @@ void MainWindow::on_sendBtn_clicked()
     if(text.trimmed().isEmpty()){
         return;
     }
-    if(m_connectionManager->sendTextMessage(text)){
+    const QVariant receiverData=ui->receiverComboBox->currentData();
+    if(!receiverData.isValid()){
+        ui->statusbar->showMessage(
+            QStringLiteral("Please select an online client."));
+        return;
+    }
+    const quint32 receiverId=receiverData.toUInt();
+    if(m_connectionManager->sendTextMessage(receiverId,text)){
         ui->messageDisplay->appendPlainText(QString("Me: %1").arg(text));
         ui->messageLineEdit->clear();
         QString databaseError;
@@ -127,5 +144,25 @@ void MainWindow::handleTextMessageReceived(const quint32 senderId,const QString 
         ui->statusbar->showMessage(
              QStringLiteral("Failed to save message:%1").arg(databaseError));
     }
+}
+
+void MainWindow::handleOnlineClientListReceived(quint32 selfId, const QList<quint32> &clientIds)
+{
+    const QVariant previousReceiverData=ui->receiverComboBox->currentData();
+    ui->receiverComboBox->clear();
+    for(quint32 clientId:clientIds){
+        if(clientId==selfId){
+            continue;
+        }
+        ui->receiverComboBox->addItem(
+            QStringLiteral("Client %1").arg(clientId),
+            QVariant::fromValue(clientId));
+    }
+    int receiverIndex=-1;
+    if(previousReceiverData.isValid()){
+        receiverIndex=ui->receiverComboBox->findData(previousReceiverData);
+    }
+    ui->receiverComboBox->setCurrentIndex(receiverIndex);
+    ui->sendBtn->setEnabled(receiverIndex>=0);
 }
 

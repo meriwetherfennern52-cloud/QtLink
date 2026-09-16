@@ -10,6 +10,9 @@ add_library(qtlink_protocol STATIC
 
     textmessagecodec.h
     textmessagecodec.cpp
+
+    onlineclientlistcodec.h
+    onlineclientlistcodec.cpp
 )
 
 target_include_directories(qtlink_protocol

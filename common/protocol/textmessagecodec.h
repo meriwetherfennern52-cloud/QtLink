@@ -17,21 +17,23 @@ class  TextMessageCodec
 
 public:
     /**
-    * @brief 将文本发送请求序列化为 JSON 字节。
+    * @brief 编码客户端文本发送请求。
     *
-    * @param content 要发送的文本内容。
-    * @return JSON 格式的文本发送请求。
+    * @param receiverId 目标客户端当前连接 ID。
+    * @param content 文本消息内容。
+    * @return 编码后的 JSON 字节数据。
     */
-    static QByteArray encodeSendRequest(const QString &content);
+    static QByteArray encodeSendRequest(quint32 receiverId,const QString &content);
 
     /**
-    * @brief 解析客户端发送的文本请求。
+    * @brief 解码客户端文本发送请求。
     *
-    * @param data JSON 格式的请求数据。
-    * @param content 用于保存解析得到的文本内容。
-    * @return 请求格式合法时返回 true，否则返回 false。
+    * @param data JSON 字节数据。
+    * @param receiverId 用于接收目标客户端当前连接 ID。
+    * @param content 用于接收文本消息内容。
+    * @return 解码成功返回 true，否则返回 false。
     */
-    static bool decodeSendRequest(const QByteArray &data,QString &content);
+    static bool decodeSendRequest(const QByteArray &data,quint32 &receiverId,QString &content);
 
     /**
     * @brief 将服务器下发的文本消息序列化为 JSON 字节。

@@ -49,22 +49,28 @@ private slots:
        void handleNewConnection();
 
     /**
-    * @brief 处理指定客户端套接字的可读事件。
+    * @brief 处理指定客户端的可读事件。
     *
-    * 将该客户端当前到达的 TCP 字节追加到其独立接收缓冲区，
+    * 根据客户端连接 ID 查找对应会话，
+    * 将当前到达的 TCP 字节追加到其独立接收缓冲区，
     * 并从缓冲区中解析完整的 QtLink 数据包。
     *
-    * @param socket 产生可读数据的客户端套接字。
+    * @param clientId 产生可读数据的客户端连接 ID。
     */
-    void handleClientReadyRead(QTcpSocket*socket);
+    void handleClientReadyRead(quint32 clientId);
 
 private:
+    /**
+    * @brief 向所有已连接客户端发送最新的在线客户端列表。
+    */
+    void broadcastOnlineClientList();
+
     struct ClientSession{
-        quint32 clientId{0};
+        QTcpSocket *socket{nullptr};
         QByteArray receiveBuffer;
     };
     QTcpServer *m_server;
-    QHash<QTcpSocket*,ClientSession>m_sessions;
+    QHash<quint32,ClientSession>m_sessions;
     quint32 m_nextClientId{1};
 };
 

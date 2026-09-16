@@ -4,6 +4,7 @@
 #include "packetcodec.h"
 #include "packetparser.h"
 #include "textmessagecodec.h"
+#include "onlineclientlistcodec.h"
 
 class ProtocolTests : public QObject
 {
@@ -26,11 +27,17 @@ private slots:
     void textCodecRejectsInvalidJson();
     void textSendRequestRejectsMissingContent();
     void textSendRequestRejectsInvalidContentType();
+    void textSendRequestRejectsInvalidReceiverId_data();
+    void textSendRequestRejectsInvalidReceiverId();
     void textMessageRejectsMissingContent();
     void textMessageRejectsMissingSenderId();
     void textMessageRejectsInvalidSenderId_data();
     void textMessageRejectsInvalidSenderId();
     void textMessageRejectsInvalidContentType();
+
+    void onlineClientListRoundTrip();
+    void onlineClientListRejectsInvalidData_data();
+    void onlineClientListRejectsInvalidData();
 };
 
 void ProtocolTests::packetCodecRoundTrip()
@@ -375,18 +382,23 @@ void ProtocolTests::textSendRequestRoundTrip_data()
 void ProtocolTests::textSendRequestRoundTrip()
 {
     QFETCH(QString, originalContent);
+    const quint32 originalReceiverId = 2;
 
     const QByteArray data =
         Protocol::TextMessageCodec::encodeSendRequest(
+            originalReceiverId,
             originalContent);
 
+    quint32 receiverId = 0;
     QString content;
 
     QVERIFY(
         Protocol::TextMessageCodec::decodeSendRequest(
             data,
+            receiverId,
             content));
 
+    QCOMPARE(receiverId, originalReceiverId);
     QCOMPARE(content, originalContent);
 }
 
@@ -418,12 +430,14 @@ void ProtocolTests::textCodecRejectsInvalidJson()
 {
     const QByteArray data("{\"content\":");
 
+    quint32 receiverId = 0;
     quint32 senderId = 0;
     QString content;
 
     QVERIFY(
         !Protocol::TextMessageCodec::decodeSendRequest(
             data,
+            receiverId,
             content));
 
     QVERIFY(
@@ -435,23 +449,59 @@ void ProtocolTests::textCodecRejectsInvalidJson()
 
 void ProtocolTests::textSendRequestRejectsMissingContent()
 {
-    const QByteArray data("{}");
+    const QByteArray data(R"({"receiverId":2})");
+    quint32 receiverId = 0;
     QString content;
 
     QVERIFY(
         !Protocol::TextMessageCodec::decodeSendRequest(
             data,
+            receiverId,
             content));
 }
 
 void ProtocolTests::textSendRequestRejectsInvalidContentType()
 {
-    const QByteArray data(R"({"content":123})");
+    const QByteArray data(R"({"receiverId":2,"content":123})");
+    quint32 receiverId = 0;
     QString content;
 
     QVERIFY(
         !Protocol::TextMessageCodec::decodeSendRequest(
             data,
+            receiverId,
+            content));
+}
+
+void ProtocolTests::textSendRequestRejectsInvalidReceiverId_data()
+{
+    QTest::addColumn<QByteArray>("data");
+
+    QTest::newRow("zero")
+        << QByteArray(R"({"receiverId":0,"content":"hello"})");
+    QTest::newRow("negative")
+        << QByteArray(R"({"receiverId":-1,"content":"hello"})");
+    QTest::newRow("fractional")
+        << QByteArray(R"({"receiverId":1.5,"content":"hello"})");
+    QTest::newRow("above-quint32-max")
+        << QByteArray(R"({"receiverId":4294967296,"content":"hello"})");
+    QTest::newRow("missing")
+        << QByteArray(R"({"content":"hello"})");
+    QTest::newRow("string")
+        << QByteArray(R"({"receiverId":"2","content":"hello"})");
+}
+
+void ProtocolTests::textSendRequestRejectsInvalidReceiverId()
+{
+    QFETCH(QByteArray, data);
+
+    quint32 receiverId = 0;
+    QString content;
+
+    QVERIFY(
+        !Protocol::TextMessageCodec::decodeSendRequest(
+            data,
+            receiverId,
             content));
 }
 
@@ -524,6 +574,71 @@ void ProtocolTests::textMessageRejectsInvalidContentType()
             data,
             senderId,
             content));
+}
+
+void ProtocolTests::onlineClientListRoundTrip()
+{
+    const quint32 originalSelfId = 2;
+    const QList<quint32> originalClientIds = {1, 2, 3};
+
+    const QByteArray data =
+        Protocol::OnlineClientListCodec::encode(
+            originalSelfId,
+            originalClientIds);
+
+    quint32 selfId = 0;
+    QList<quint32> clientIds;
+
+    QVERIFY(
+        Protocol::OnlineClientListCodec::decode(
+            data,
+            selfId,
+            clientIds));
+
+    QCOMPARE(selfId, originalSelfId);
+    QCOMPARE(clientIds, originalClientIds);
+}
+
+void ProtocolTests::onlineClientListRejectsInvalidData_data()
+{
+    QTest::addColumn<QByteArray>("data");
+
+    QTest::newRow("invalid-json")
+        << QByteArray(R"({"selfId":2,"clientIds":[)");
+    QTest::newRow("missing-self-id")
+        << QByteArray(R"({"clientIds":[1,2,3]})");
+    QTest::newRow("missing-client-ids")
+        << QByteArray(R"({"selfId":2})");
+    QTest::newRow("self-id-string")
+        << QByteArray(R"({"selfId":"2","clientIds":[1,2,3]})");
+    QTest::newRow("client-ids-not-array")
+        << QByteArray(R"({"selfId":2,"clientIds":2})");
+    QTest::newRow("client-id-string")
+        << QByteArray(R"({"selfId":2,"clientIds":[1,2,"3"]})");
+    QTest::newRow("client-id-zero")
+        << QByteArray(R"({"selfId":2,"clientIds":[1,2,0]})");
+    QTest::newRow("client-id-negative")
+        << QByteArray(R"({"selfId":2,"clientIds":[1,2,-1]})");
+    QTest::newRow("client-id-fractional")
+        << QByteArray(R"({"selfId":2,"clientIds":[1,2,1.5]})");
+    QTest::newRow("client-id-above-quint32-max")
+        << QByteArray(R"({"selfId":2,"clientIds":[1,2,4294967296]})");
+    QTest::newRow("self-id-not-in-list")
+        << QByteArray(R"({"selfId":2,"clientIds":[1,3]})");
+}
+
+void ProtocolTests::onlineClientListRejectsInvalidData()
+{
+    QFETCH(QByteArray, data);
+
+    quint32 selfId = 0;
+    QList<quint32> clientIds;
+
+    QVERIFY(
+        !Protocol::OnlineClientListCodec::decode(
+            data,
+            selfId,
+            clientIds));
 }
 
 QTEST_APPLESS_MAIN(ProtocolTests)

@@ -4,23 +4,22 @@
 #include <QObject>
 // #include <QTcpSocket>
 #include <QByteArray>
+#include<QList>
 class QTcpSocket; //前置声明，.cpp里再写↑，减少头文件之间的耦合和不必要的编译依赖
 
 /**
- * @brief 管理客户端与服务器之间的 TCP 连接。
+ * @brief 管理客户端与服务器之间的 TCP 连接及协议消息收发。
  *
- * ConnectionManager
- * 负责 QTcpSocket 的生命周期、服务器连接与断开，
- * 并通过信号向上层通知连接状态和网络错误。
+ * 负责 QTcpSocket 生命周期、连接状态管理、
+ * TCP 接收缓冲区维护及 QtLink 数据包解析，
+ * 并通过信号向上层通知文本消息、在线客户端列表和网络错误。
  *
  * 当前类不负责：
- * - 应用层协议解析
- * - 消息业务
+ * - UI 展示
+ * - 本地数据库持久化
  * - 心跳检测
  * - 自动重连
  * - 文件传输
- *
- * 当前阶段对象运行在 GUI 主线程中，依赖 Qt 事件循环进行异步网络通信。
  */
 class ConnectionManager : public QObject
 {
@@ -41,14 +40,13 @@ public:
     void disconnectFromServer();
 
     /**
-    * @brief 向当前已连接的服务器发送文本消息。
+    * @brief 向指定在线客户端发送文本消息请求。
     *
-    * 将文本转换为 UTF-8 字节，封装为 QtLink TextMessage 数据包后发送。
-    *
-    * @param text 要发送的文本内容。
-    * @return 成功提交给套接字发送时返回 true，否则返回 false。
+    * @param receiverId 目标客户端当前连接 ID。
+    * @param text 文本消息内容。
+    * @return 请求成功写入 Socket 发送缓冲区返回 true，否则返回 false。
     */
-    bool sendTextMessage(const QString &text);
+    bool sendTextMessage(quint32 receiverId,const QString &text);
 
 signals:
     /**
@@ -82,6 +80,14 @@ signals:
     * @param text 文本消息内容。
     */
     void textMessageReceived(const quint32 senderId,const QString &text);
+
+    /**
+    * @brief 通知上层服务器下发了最新的在线客户端列表。
+    *
+    * @param selfId 当前客户端自身的连接 ID。
+    * @param clientIds 当前所有在线客户端的连接 ID。
+    */
+    void onlineClientListReceived(quint32 selfId,const QList<quint32>&clientIds);
 
 private slots:
     /**

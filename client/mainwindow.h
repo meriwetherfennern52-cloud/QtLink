@@ -55,6 +55,15 @@ private slots:
     */
     void handleTextMessageReceived(const quint32 senderId,const QString &text);
 
+    /**
+    * @brief 更新服务器下发的在线客户端列表。
+    *
+    * @param selfId 当前客户端自身的连接 ID。
+    * @param clientIds 当前所有在线客户端的连接 ID。
+    */
+    void handleOnlineClientListReceived(quint32 selfId,const QList<quint32>&clientIds);
+
+
 private:
     Ui::MainWindow *ui;
     ConnectionManager*m_connectionManager;

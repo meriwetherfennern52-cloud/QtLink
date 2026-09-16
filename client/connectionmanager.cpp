@@ -5,6 +5,7 @@
 #include<QDataStream>
 #include"packetcodec.h"
 #include"textmessagecodec.h"
+#include"onlineclientlistcodec.h"
 
 ConnectionManager::ConnectionManager(QObject *parent)
     : QObject{parent},m_socket(new QTcpSocket(this))
@@ -32,7 +33,7 @@ void ConnectionManager::disconnectFromServer()
     m_socket->disconnectFromHost();
 }
 
-bool ConnectionManager::sendTextMessage(const QString &text)
+bool ConnectionManager::sendTextMessage(quint32 receiverId,const QString &text)
 {
     if(m_socket->state()!=QAbstractSocket::ConnectedState){
         emit operationError("Cannot send message:not connected to server.");
@@ -44,7 +45,7 @@ bool ConnectionManager::sendTextMessage(const QString &text)
 
     Protocol::Packet packet;
     packet.type=Protocol::MessageType::TextSendRequest;
-    packet.body=Protocol::TextMessageCodec::encodeSendRequest(text);
+    packet.body=Protocol::TextMessageCodec::encodeSendRequest(receiverId,text);
 
     if(packet.body.size()>static_cast<qsizetype>(Protocol::MAX_BODY_SIZE)){
         emit operationError("Message is too large");
@@ -80,17 +81,37 @@ void ConnectionManager::handleReadyRead()
             disconnectFromServer();
             break;
         }
-        if(packet.type!=Protocol::MessageType::TextMessage){
-            emit operationError("Received unexpected message type from server.");
-            continue;
+
+        switch(packet.type){
+        case Protocol::MessageType::TextMessage:{
+            quint32 senderId=0;
+            QString content;
+            if(!Protocol::TextMessageCodec::decodeTextMessage(
+                    packet.body,senderId,content)){
+                emit operationError("Invalid text message");
+                break;
+            }
+            emit textMessageReceived(senderId,content);
+            break;
         }
-        quint32 senderId=0;
-        QString content;
-        if(!Protocol::TextMessageCodec::decodeTextMessage(packet.body,senderId,content)){
-            emit operationError("Invalid text message");
-            continue;
+        case Protocol::MessageType::OnlineClientList:{
+            quint32 selfId=0;
+            QList<quint32>clientIds;
+            if(!Protocol::OnlineClientListCodec::decode(
+                    packet.body,selfId,clientIds)){
+                emit operationError(QStringLiteral(
+                        "Failed to decode online client list."));
+                break;
+            }
+            emit onlineClientListReceived(selfId,clientIds);
+            break;
         }
-        emit textMessageReceived(senderId,content);
+        default:
+            emit operationError(QStringLiteral("Unexpected message type from server."));
+            break;
+        }
+
+
     }
 }
 

@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>294</width>
-    <height>276</height>
+    <width>324</width>
+    <height>306</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -92,6 +92,20 @@
      <widget class="QWidget" name="widget_3" native="true">
       <layout class="QHBoxLayout" name="horizontalLayout_2">
        <item>
+        <widget class="QLabel" name="receiverLabel">
+         <property name="text">
+          <string>发送给：</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QComboBox" name="receiverComboBox">
+         <property name="enabled">
+          <bool>false</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
         <widget class="QLineEdit" name="messageLineEdit"/>
        </item>
        <item>
@@ -114,7 +128,7 @@
     <rect>
      <x>0</x>
      <y>0</y>
-     <width>294</width>
+     <width>324</width>
      <height>18</height>
     </rect>
    </property>

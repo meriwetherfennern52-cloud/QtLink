@@ -45,7 +45,7 @@ bool DatabaseManager::saveMessage(MessageDirection direction, const QString &con
     return true;
 }
 
-bool DatabaseManager::loadMessage(QList<MessageRecord> &messages, QString &errorMessage)
+bool DatabaseManager::loadMessages(QList<MessageRecord> &messages, QString &errorMessage)
 {
     if(!m_database.isOpen()){
         errorMessage=QStringLiteral("Database is not open.");

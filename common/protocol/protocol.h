@@ -33,8 +33,9 @@ constexpr quint32 MAX_BODY_SIZE=8*1024*1024;
  * 底层类型固定为 quint16，因此在协议中占 2 字节。
  */
 enum class MessageType:quint16{
-    TextSendRequest=1,  //Client->Server
-    TextMessage=2       //Server->Client
+    TextSendRequest=1,   //Client->Server
+    TextMessage=2,       //Server->Client
+    OnlineClientList=3   //Server->Client
 };
 
 /**
@@ -47,6 +48,7 @@ constexpr bool isValidMessageType(quint16 value){
     switch (static_cast<MessageType>(value)) {
     case MessageType::TextSendRequest:
     case MessageType::TextMessage:
+    case MessageType::OnlineClientList:
         return true;
     default:
         return false;

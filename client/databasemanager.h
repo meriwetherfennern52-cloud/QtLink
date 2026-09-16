@@ -50,7 +50,7 @@ public:
      * @param errorMessage 查询失败时返回错误信息。
      * @return 加载成功返回 true，否则返回 false。
      */
-    bool loadMessage(QList<MessageRecord>&messages,QString &errorMessage);
+    bool loadMessages(QList<MessageRecord>&messages,QString &errorMessage);
 
 private:
     /**
