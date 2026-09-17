@@ -13,6 +13,10 @@ add_library(qtlink_protocol STATIC
 
     onlineclientlistcodec.h
     onlineclientlistcodec.cpp
+
+    filetransfercontrolcodec.h
+    filetransfercontrolcodec.cpp
+    filechunkcodec.h filechunkcodec.cpp
 )
 
 target_include_directories(qtlink_protocol
