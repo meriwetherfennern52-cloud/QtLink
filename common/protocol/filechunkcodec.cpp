@@ -2,7 +2,7 @@
 
 #include <QIODevice>
 #include <QUuid>
-
+#include <QDataStream>
 
 
 QByteArray Protocol::FileChunkCodec::encode(const QString &transferId,
@@ -10,6 +10,10 @@ QByteArray Protocol::FileChunkCodec::encode(const QString &transferId,
 {
     QUuid uuid=QUuid::fromString(transferId);
     if(uuid.isNull()){
+        return QByteArray();
+    }
+
+    if(chunkData.isEmpty()||chunkData.size()>Protocol::MAX_FILE_CHUNK_DATA_SIZE){
         return QByteArray();
     }
 
@@ -48,7 +52,7 @@ bool Protocol::FileChunkCodec::decode(const QByteArray &data,
     }
 
     QByteArray parsedChunkData=data.mid(metadataSize);
-    if(parsedChunkData.isEmpty()){
+    if(parsedChunkData.isEmpty()||parsedChunkData.size()>Protocol::MAX_FILE_CHUNK_DATA_SIZE){
         return false;
     }
 

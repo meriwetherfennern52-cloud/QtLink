@@ -18,6 +18,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_tcpServer,&TcpServer::serverError,this,[this](const QString &message){
         ui->statusbar->showMessage(QString("Server error: %1").arg(message));
     });
+
 }
 
 MainWindow::~MainWindow()

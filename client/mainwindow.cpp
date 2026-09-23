@@ -1,11 +1,15 @@
 #include "mainwindow.h"
 #include "./ui_mainwindow.h"
+#include<QFileDialog>
+#include <QFileInfo>
 #include"connectionmanager.h"
+#include"filetransfermanager.h"
 
 MainWindow::MainWindow(const QString &databasePath,QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     ,m_connectionManager(new ConnectionManager(this))
+    ,m_fileTransferManager(new FileTransferManager(m_connectionManager,this))
     ,m_databaseManager(databasePath)
 {
     ui->setupUi(this);
@@ -52,7 +56,23 @@ MainWindow::MainWindow(const QString &databasePath,QWidget *parent)
             &MainWindow::handleOnlineClientListReceived);
     connect(ui->receiverComboBox,&QComboBox::currentIndexChanged,this,
             [this](int index){
-                ui->sendBtn->setEnabled(true);
+                ui->sendBtn->setEnabled(index>=0);
+                ui->sendFileBtn->setEnabled(index>=0&&!m_selectedFilePath.isEmpty());
+    });
+
+    connect(m_fileTransferManager,&FileTransferManager::sendProgressChanged,
+            this,[this](qint64 sentBytes,qint64 totalBytes){
+        int progress=100;
+        if(totalBytes>0){
+            progress=static_cast<double>(
+                static_cast<double>(sentBytes)/static_cast<double>(totalBytes)*100.0);
+        }
+        ui->fileProgressBar->setValue(progress);
+    });
+
+    connect(m_fileTransferManager,&FileTransferManager::fileReceiveCompleted,
+            this,[this](const QString&filePath){
+        statusBar()->showMessage(QString("文件接收完成：%1").arg(filePath),5000);
     });
 }
 
@@ -98,6 +118,7 @@ void MainWindow::handleDisconnected()
     ui->connectBtn->setEnabled(true);
     ui->disconnectBtn->setDisabled(true);
     ui->sendBtn->setDisabled(true);
+    ui->sendFileBtn->setDisabled(true);
     ui->receiverComboBox->clear();
     ui->receiverComboBox->setDisabled(true);
 }
@@ -164,5 +185,49 @@ void MainWindow::handleOnlineClientListReceived(quint32 selfId, const QList<quin
     }
     ui->receiverComboBox->setCurrentIndex(receiverIndex);
     ui->sendBtn->setEnabled(receiverIndex>=0);
+}
+
+
+void MainWindow::on_selectFileBtn_clicked()
+{
+    QString filePath=QFileDialog::getOpenFileName(this,"选择文件");
+    if(filePath.isEmpty()){
+        return;
+    }
+    m_selectedFilePath=filePath;
+    ui->filePathLineEdit->setText(filePath);
+
+    ui->sendFileBtn->setEnabled(ui->receiverComboBox->currentData().isValid());
+    ui->fileProgressBar->setValue(0);
+}
+
+
+void MainWindow::on_sendFileBtn_clicked()
+{
+    if(m_selectedFilePath.isEmpty()){
+        ui->statusbar->showMessage("请先选择要发送的文件");
+        return;
+    }
+
+    QFileInfo fileInfo(m_selectedFilePath);
+    if(!fileInfo.exists()||!fileInfo.isFile()||!fileInfo.isReadable()){
+        ui->statusbar->showMessage("当前文件不存在或无法读取，请重新选择");
+        return;
+    }
+
+    const QVariant receiverData=ui->receiverComboBox->currentData();
+    if(!receiverData.isValid()){
+        ui->statusbar->showMessage("请选择接受客户端");
+        return;
+    }
+
+    const quint32 receiverId=receiverData.toUInt();
+
+    if(!m_fileTransferManager->sendFile(m_selectedFilePath,receiverId)){
+        ui->statusbar->showMessage("文件发送启动失败");
+        return;
+    }
+
+    ui->statusbar->showMessage("文件传输开始");
 }
 

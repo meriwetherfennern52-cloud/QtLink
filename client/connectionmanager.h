@@ -6,6 +6,9 @@
 #include <QByteArray>
 #include<QList>
 class QTcpSocket; //前置声明，.cpp里再写↑，减少头文件之间的耦合和不必要的编译依赖
+namespace Protocol{
+struct Packet;
+}
 
 /**
  * @brief 管理客户端与服务器之间的 TCP 连接及协议消息收发。
@@ -48,6 +51,40 @@ public:
     */
     bool sendTextMessage(quint32 receiverId,const QString &text);
 
+    /**
+     * @brief 向服务器发送文件传输开始请求。
+     * @param receiverId 目标客户端连接 ID。
+     * @param transferId 本次文件传输的唯一标识。
+     * @param fileName 文件名。
+     * @param fileSize 文件总字节数。
+     * @return 成功写入 Socket 发送缓冲区返回 true，否则返回 false。
+     */
+    bool sendFileStartRequest(quint32 receiverId,const QString&transferId,
+            const QString&fileName,qint64 fileSize);
+
+    /**
+    * @brief 向服务器发送一个文件数据块。
+    * @param transferId 本次文件传输唯一标识。
+    * @param offset 当前数据块在文件中的起始偏移。
+    * @param chunkData 文件数据块。
+    * @return 成功写入 Socket 发送缓冲区返回 true，否则返回 false。
+    */
+    bool sendFileChunkRequest(const QString&transferId,qint64 offset,
+                              const QByteArray &chunkData);
+
+    /**
+    * @brief 获取当前 Socket 写缓冲区中等待发送的字节数。
+    * @return 当前待发送字节数。
+    */
+    qint64 pendingBytesToWrite()const;
+
+    /**
+    * @brief 向服务器发送文件传输结束请求。
+    * @param transferId 本次文件传输唯一标识。
+    * @return 成功写入 Socket 发送缓冲区返回 true，否则返回 false。
+    */
+    bool sendFileEndRequest(const QString&transferId);
+
 signals:
     /**
      * @brief TCP 连接建立成功。
@@ -89,6 +126,38 @@ signals:
     */
     void onlineClientListReceived(quint32 selfId,const QList<quint32>&clientIds);
 
+    /**
+     * @brief 收到服务器转发的文件传输开始消息。
+     * @param senderId 文件发送客户端 ID。
+     * @param transferId 本次文件传输唯一标识。
+     * @param fileName 文件名。
+     * @param fileSize 文件总字节数。
+     */
+    void fileStartReceived(
+        quint32 senderId,const QString&transferId,
+        const QString&fileName,qint64 fileSize);
+
+    /**
+    * @brief 收到服务器转发的文件数据块。
+    * @param transferId 本次文件传输唯一标识。
+    * @param offset 当前数据块在文件中的起始偏移。
+    * @param chunkData 文件数据块。
+    */
+    void fileChunkReceived(const QString &transferId,qint64 offset,
+        const QByteArray &chunkData);
+
+    /**
+    * @brief Socket 有数据从写缓冲区发送出去。
+    * @param bytes 本次写出的字节数。
+    */
+    void socketBytesWritten(qint64 bytes);
+
+    /**
+    * @brief 收到服务器转发的文件传输结束消息。
+    * @param transferId 本次文件传输唯一标识。
+    */
+    void fileEndReceived(const QString&transferId);
+
 private slots:
     /**
      * @brief 处理套接字可读事件。
@@ -106,8 +175,17 @@ private slots:
     void handleSocketDisconnected();
 
 private:
+    /**
+    * @brief 将一个 QtLink 数据包写入 Socket 发送缓冲区。
+    *
+    * @param packet 已构造完成的 QtLink 数据包。
+    * @return 成功写入 Socket 发送缓冲区返回 true，否则返回 false。
+    */
+    bool writePacket(const Protocol::Packet &packet);
+
     QTcpSocket*m_socket;
     QByteArray m_receiveBuffer;
+
 };
 
 #endif // CONNECTIONMANAGER_H

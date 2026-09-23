@@ -13,6 +13,7 @@ class MainWindow;
 QT_END_NAMESPACE
 
 class ConnectionManager;
+class FileTransferManager;
 
 /**
  * @brief QtLink 客户端主窗口。
@@ -63,10 +64,18 @@ private slots:
     */
     void handleOnlineClientListReceived(quint32 selfId,const QList<quint32>&clientIds);
 
+    /**
+     * @brief 打开文件选择对话框并记录待发送文件信息。
+     */
+    void on_selectFileBtn_clicked();
+
+    void on_sendFileBtn_clicked();
 
 private:
     Ui::MainWindow *ui;
     ConnectionManager*m_connectionManager;
+    FileTransferManager*m_fileTransferManager;
     DatabaseManager m_databaseManager;
+    QString m_selectedFilePath;
 };
 #endif // MAINWINDOW_H

@@ -7,6 +7,8 @@
 
 namespace Protocol{
 
+static constexpr qint64 MAX_FILE_CHUNK_DATA_SIZE=64*1024;
+
 class FileChunkCodec
 {
 public:

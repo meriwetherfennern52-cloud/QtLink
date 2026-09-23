@@ -32,6 +32,61 @@ public:
      */
     void stopServer();
 
+private:
+    /**
+    * @brief 向所有已连接客户端发送最新的在线客户端列表。
+    */
+    void broadcastOnlineClientList();
+
+    /**
+     * @brief 处理客户端发来的文件传输开始请求。
+     * @param senderId 发起文件传输的客户端 ID。
+     * @param body FileStartRequest 消息体。
+     */
+    void handleFileStartRequest(quint32 senderId,const QByteArray &body);
+
+    /**
+    * @brief 处理客户端发送的文本消息请求。
+    * @param senderId 消息发送客户端 ID。
+    * @param body TextSendRequest 消息体。
+    */
+    void handleTextSendRequest(quint32 senderId,const QByteArray&body);
+
+    /**
+    * @brief 处理客户端发送的文件数据块请求。
+    * @param senderId 文件发送客户端 ID。
+    * @param body FileChunkRequest 消息体。
+    */
+    void handleFileChunkRequest(quint32 senderId,const QByteArray&body);
+
+    /**
+    * @brief 处理客户端发送的文件传输结束请求。
+    * @param senderId 文件发送客户端 ID。
+    * @param body FileEndRequest 消息体。
+    */
+    void handleFileEndRequest(quint32 senderId,const QByteArray&body);
+
+    /**
+    * @brief 清理所有与指定客户端相关的活动文件传输。
+    * @param clientId 已断开连接的客户端 ID。
+   */
+    void cleanupTransfersForClient(quint32 clientId);
+
+    /**
+     * @brief 查找导致指定发送客户端需要暂停读取的拥塞接收端。
+     * @param senderId 文件发送客户端 ID。
+     * @param receiverId 用于接收发生拥塞的接收客户端 ID。
+     * @return 找到拥塞接收端返回 true，否则返回 false。
+     */
+    bool findBackpressuredReceiver(
+        quint32 senderId,quint32 &receiverId) const;
+
+    /**
+    * @brief 接收端写缓冲恢复后，尝试继续处理向其发送文件的客户端。
+    * @param receiverId 文件接收客户端 ID。
+    */
+    void resumeSendersForReceiver(quint32 receiverId);
+
 signals:
     void clientCountChanged(int count);
 
@@ -60,18 +115,34 @@ private slots:
     void handleClientReadyRead(quint32 clientId);
 
 private:
-    /**
-    * @brief 向所有已连接客户端发送最新的在线客户端列表。
-    */
-    void broadcastOnlineClientList();
+    static constexpr qint64 FORWARD_HIGH_WATER_MARK=
+        256*1024;
+
+    static constexpr qint64 FORWARD_LOW_WATER_MARK=
+        128*1024;
+
+    static constexpr qint64 SOCKET_READ_BUFFER_LIMIT=
+        256*1024;
 
     struct ClientSession{
         QTcpSocket *socket{nullptr};
         QByteArray receiveBuffer;
+
+        bool readPaused{false};
+        quint32 blockedReceiverId{0};
     };
+    struct ActiveTransfer{
+        quint32 receiverId{0};
+        quint32 senderId{0};
+        qint64 fileSize{0};
+        qint64 nextOffset{0};
+    };
+
     QTcpServer *m_server;
     QHash<quint32,ClientSession>m_sessions;
     quint32 m_nextClientId{1};
+
+    QHash<QString,ActiveTransfer>m_activeTransfers;
 };
 
 #endif // TCPSERVER_H
