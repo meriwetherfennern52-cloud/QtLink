@@ -4,8 +4,11 @@
 #include <QObject>
 #include<QHash>
 #include<QByteArray>
+#include<QElapsedTimer>
+#include"protocol.h"
 class QTcpServer;
 class QTcpSocket;
+class QTimer;
 /**
  * @brief QtLink 服务端 TCP 连接与消息转发管理类。
  *
@@ -67,6 +70,18 @@ private:
     void handleFileEndRequest(quint32 senderId,const QByteArray&body);
 
     /**
+    * @brief 处理文件接收端发来的最终完成确认。
+    *
+    * 验证请求客户端确实是指定传输的接收端，
+    * 并确认传输处于等待接收完成阶段。
+    * 验证成功后向发送端转发 FileComplete。
+    *
+    * @param receiverId 发出完成确认的客户端 ID。
+    * @param body FileCompleteRequest 消息体。
+    */
+    void handleFileCompleteRequest(quint32 receiverId,const QByteArray &body);
+
+    /**
     * @brief 清理所有与指定客户端相关的活动文件传输。
     * @param clientId 已断开连接的客户端 ID。
    */
@@ -86,6 +101,71 @@ private:
     * @param receiverId 文件接收客户端 ID。
     */
     void resumeSendersForReceiver(quint32 receiverId);
+
+    /**
+    * @brief 删除传输后解除发送端不再需要的背压状态。
+    * @param senderId 文件发送客户端 ID。
+    * @param receiverId 原文件接收客户端 ID。
+    */
+    void resumeSenderAfterTransferRemoval(quint32 senderId,quint32 receiverId);
+
+    /**
+    * @brief 判断发送端是否仍有向指定接收端传输数据的任务。
+    * @param senderId 文件发送客户端 ID。
+    * @param receiverId 文件接收客户端 ID。
+    * @return 仍存在数据传输阶段的任务时返回 true。
+    */
+    bool hasTransferringDependency(quint32 senderId,quint32 receiverId) const;
+
+    /**
+    * @brief 将指定客户端连接安排为确定断开。
+    * @param clientId 要断开的客户端 ID。
+    */
+    void scheduleClientDisconnect(quint32 clientId);
+
+    /**
+    * @brief 刷新指定接收端相关文件传输的活动时间。
+    * @param receiverId 文件接收客户端 ID。
+    */
+    void updateReceiverTransferActivity(quint32 receiverId);
+
+    /**
+    * @brief 检查并终止长时间没有进展的文件传输。
+    */
+    void checkStalledTransfers();
+
+    /**
+    * @brief 处理客户端发来的文件传输终止请求。
+    *
+    * 校验请求客户端是否属于指定活动传输，
+    * 终止服务端对应传输状态，并通知仍在线的另一端。
+    *
+    * @param clientId 发起终止请求的客户端 ID。
+    * @param body FileAbortRequest 消息体。
+    */
+    void handleFileAbortRequest(quint32 clientId,const QByteArray&body);
+
+    /**
+    * @brief 向指定客户端发送文件传输终止通知。
+    *
+    * @param clientId 接收通知的客户端 ID。
+    * @param transferId 文件传输唯一标识。
+    * @param reason 文件传输终止原因。
+    * @return 数据成功提交到目标 Socket 写缓冲时返回 true，否则返回 false。
+    */
+    bool sendFileAbort(quint32 clientId,
+                       const QString&transferId,Protocol::FileAbortReason reason);
+
+    /**
+    * @brief 因服务端检测到异常而终止指定活动文件传输。
+    *
+    * 删除服务端的活动传输状态，向传输两端发送 FileAbort，
+    * 并清理该传输可能遗留的服务端背压状态。
+    *
+    * @param transferId 要终止的文件传输唯一标识。
+    * @param reason 文件传输终止原因。
+    */
+    void abortTransferFromServer(const QString&transferId,Protocol::FileAbortReason reason);
 
 signals:
     void clientCountChanged(int count);
@@ -124,6 +204,10 @@ private:
     static constexpr qint64 SOCKET_READ_BUFFER_LIMIT=
         256*1024;
 
+    static constexpr int TRANSFER_WATCH_INTERVAL_MS=5000;
+
+    static constexpr qint64 TRANSFER_STALL_TIMEOUT_MS=60000;
+
     struct ClientSession{
         QTcpSocket *socket{nullptr};
         QByteArray receiveBuffer;
@@ -131,14 +215,24 @@ private:
         bool readPaused{false};
         quint32 blockedReceiverId{0};
     };
+
+    enum class TransferPhase {
+        Transferring,
+        AwaitingReceiverComplete
+    };
+
     struct ActiveTransfer{
         quint32 receiverId{0};
         quint32 senderId{0};
         qint64 fileSize{0};
         qint64 nextOffset{0};
+        TransferPhase phase{TransferPhase::Transferring};
+        qint64 lastActivityMs{0};
     };
 
     QTcpServer *m_server;
+    QTimer *m_transferWatchTimer;
+    QElapsedTimer m_transferClock;
     QHash<quint32,ClientSession>m_sessions;
     quint32 m_nextClientId{1};
 

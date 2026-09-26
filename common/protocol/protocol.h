@@ -37,12 +37,29 @@ enum class MessageType:quint16{
     TextMessage=2,        //Server->Client
     OnlineClientList=3,   //Server->Client
 
-    FileStartRequest=4,   //Client->Server
-    FileStart=5,          //Server->Client
-    FileChunkRequest=6,   //Client->Server
-    FileChunk=7,          //Server->Client
-    FileEndRequest=8,     //Client->Server
-    FileEnd=9,            //Server->Client
+    FileStartRequest=4,
+    FileStart=5,
+    FileChunkRequest=6,
+    FileChunk=7,
+    FileEndRequest=8,
+    FileEnd=9,
+
+    FileAbortRequest=10,
+    FileAbort=11,
+
+    FileCompleteRequest = 12,
+    FileComplete = 13
+};
+
+/**
+ * @brief 文件传输异常终止原因。
+ */
+enum class FileAbortReason:quint8{
+    PeerDisconnected=1,
+    IoError=2,
+    Cancelled=3,
+    ProtocolError=4,
+    Timeout=5
 };
 
 /**
@@ -62,6 +79,29 @@ constexpr bool isValidMessageType(quint16 value){
     case MessageType::FileChunk:
     case MessageType::FileEndRequest:
     case MessageType::FileEnd:
+    case MessageType::FileAbortRequest:
+    case MessageType::FileAbort:
+    case MessageType::FileCompleteRequest:
+    case MessageType::FileComplete:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/**
+ * @brief 判断文件传输终止原因值是否为当前协议支持的类型。
+ *
+ * @param value 网络消息中的原始原因值。
+ * @return 当前协议支持该原因时返回 true，否则返回 false。
+ */
+constexpr bool isValidFileAbortReason(quint8 value){
+    switch (static_cast<FileAbortReason>(value)) {
+    case FileAbortReason::PeerDisconnected:
+    case FileAbortReason::IoError:
+    case FileAbortReason::Cancelled:
+    case FileAbortReason::ProtocolError:
+    case Protocol::FileAbortReason::Timeout:
         return true;
     default:
         return false;

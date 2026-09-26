@@ -171,3 +171,72 @@ bool Protocol::FileTransferControlCodec::decodeEnd(const QByteArray &data, QStri
 
     return true;
 }
+
+QByteArray Protocol::FileTransferControlCodec::encodeAbort(const QString &transferId, FileAbortReason reason)
+{
+    QString normalizedTransferId;
+    if(!normalizeTransferId(transferId,normalizedTransferId)){
+        return QByteArray();
+    }
+
+    const quint8 reasonValue=static_cast<quint8>(reason);
+
+    if(!isValidFileAbortReason(reasonValue)){
+        return QByteArray();
+    }
+
+    QJsonObject jsonObject;
+    jsonObject["transferId"]=normalizedTransferId;
+    jsonObject["reason"]=reasonValue;
+
+    return QJsonDocument(jsonObject).toJson(QJsonDocument::Compact);
+}
+
+bool Protocol::FileTransferControlCodec::decodeAbort(const QByteArray &data,
+                QString &transferId, FileAbortReason &reason)
+{
+    QJsonParseError parseError;
+    QJsonDocument jsonDocument=QJsonDocument::fromJson(data,&parseError);
+
+    if(parseError.error!=QJsonParseError::NoError||!jsonDocument.isObject()){
+        return false;
+    }
+
+    QJsonObject jsonObject=jsonDocument.object();
+    QJsonValue transferIdValue=jsonObject.value("transferId");
+    QJsonValue reasonValue=jsonObject.value("reason");
+
+    if(!transferIdValue.isString()||!reasonValue.isDouble()){
+        return false;
+    }
+
+    QString parseTransferId;
+    if(!normalizeTransferId(transferIdValue.toString(),parseTransferId)){
+        return false;
+    }
+
+    const qint64 parseReason=reasonValue.toInteger(-1);
+    if(parseReason<0
+        ||parseReason>static_cast<qint64>(std::numeric_limits<quint8>::max())){
+        return false;
+    }
+
+    if(!isValidFileAbortReason(static_cast<quint8>(parseReason))){
+        return false;
+    }
+
+    transferId=parseTransferId;
+    reason=static_cast<FileAbortReason>(parseReason);
+
+    return true;
+}
+
+QByteArray Protocol::FileTransferControlCodec::encodeComplete(const QString &transferId)
+{
+    return encodeEnd(transferId);
+}
+
+bool Protocol::FileTransferControlCodec::decodeComplete(const QByteArray &data, QString &transferId)
+{
+    return decodeEnd(data,transferId);
+}

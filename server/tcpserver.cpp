@@ -10,11 +10,18 @@
 #include"filetransfercontrolcodec.h"
 #include "filechunkcodec.h"
 #include<QSet>
+#include<QTimer>
 
 TcpServer::TcpServer(QObject *parent)
-    : QObject{parent},m_server(new QTcpServer(this))
+    : QObject{parent}
+    ,m_server(new QTcpServer(this))
+    ,m_transferWatchTimer(new QTimer(this))
 {
     connect(m_server,&QTcpServer::newConnection,this,&TcpServer::handleNewConnection);
+    connect(m_transferWatchTimer,&QTimer::timeout,
+            this,&TcpServer::checkStalledTransfers);
+    m_transferClock.start();
+    m_transferWatchTimer->start(TRANSFER_WATCH_INTERVAL_MS);
 }
 
 bool TcpServer::startServer(quint16 port)
@@ -92,6 +99,7 @@ void TcpServer::handleNewConnection()
 
         connect(socket,&QTcpSocket::bytesWritten,
             this,[this,clientId](qint64){
+                updateReceiverTransferActivity(clientId);
                 resumeSendersForReceiver(
                     clientId);
             });
@@ -130,6 +138,10 @@ void TcpServer::handleClientReadyRead(quint32 clientId)
     receiveBuffer.append(newData);
 
     while(true){
+        if(session.readPaused){
+            return;
+        }
+
         // 上一个 Chunk 可能刚刚让 Receiver 达到高水位。
         // 必须在消费下一个 Packet 前再次检查。
         blockedReceiverId=0;
@@ -163,6 +175,12 @@ void TcpServer::handleClientReadyRead(quint32 clientId)
             break;
         case Protocol::MessageType::FileEndRequest:
             handleFileEndRequest(clientId,packet.body);
+            break;
+        case Protocol::MessageType::FileAbortRequest:
+            handleFileAbortRequest(clientId,packet.body);
+            break;
+        case Protocol::MessageType::FileCompleteRequest:
+            handleFileCompleteRequest(clientId,packet.body);
             break;
         default:
             emit logMessage(QString("Client %1 sent an unexpected message type.").arg(clientId));
@@ -229,6 +247,7 @@ void TcpServer::handleFileStartRequest(quint32 senderId, const QByteArray &body)
     }
 
     if(senderId==receiverId){
+        sendFileAbort(senderId,transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
@@ -236,10 +255,12 @@ void TcpServer::handleFileStartRequest(quint32 senderId, const QByteArray &body)
     if(receiverIt==m_sessions.end()
         ||receiverIt->socket==nullptr
         ||receiverIt->socket->state()!=QAbstractSocket::ConnectedState){
+        sendFileAbort(senderId,transferId,Protocol::FileAbortReason::PeerDisconnected);
         return;
     }
 
     if(m_activeTransfers.contains(transferId)){
+        sendFileAbort(senderId,transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
@@ -247,6 +268,7 @@ void TcpServer::handleFileStartRequest(quint32 senderId, const QByteArray &body)
         senderId,transferId,fileName,fileSize);
 
     if(startBody.isEmpty()){
+        sendFileAbort(senderId,transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
@@ -257,6 +279,7 @@ void TcpServer::handleFileStartRequest(quint32 senderId, const QByteArray &body)
     QByteArray encoded=Protocol::PacketCodec::encode(packet);
 
     if(receiverIt->socket->write(encoded)<0){
+        sendFileAbort(senderId,transferId,Protocol::FileAbortReason::PeerDisconnected);
         return;
     }
 
@@ -265,6 +288,8 @@ void TcpServer::handleFileStartRequest(quint32 senderId, const QByteArray &body)
     transfer.receiverId=receiverId;
     transfer.fileSize=fileSize;
     transfer.nextOffset=0;
+    transfer.phase=TransferPhase::Transferring;
+    transfer.lastActivityMs=m_transferClock.elapsed();
 
     m_activeTransfers.insert(transferId,transfer);
 
@@ -352,6 +377,7 @@ void TcpServer::handleFileChunkRequest(quint32 senderId, const QByteArray &body)
 
     if(!Protocol::FileChunkCodec::decode(body,transferId,offset,chunkData)){
         emit logMessage(QString("Client %1 sent an invalid file chunk").arg(senderId));
+        scheduleClientDisconnect(senderId);
         return;
     }
 
@@ -359,6 +385,7 @@ void TcpServer::handleFileChunkRequest(quint32 senderId, const QByteArray &body)
     if(chunkSize<=0||chunkSize>Protocol::MAX_FILE_CHUNK_DATA_SIZE){
         emit logMessage(QString("Invalid file chunk size from client %1: %2")
                 .arg(senderId).arg(chunkSize));
+        scheduleClientDisconnect(senderId);
         return;
     }
 
@@ -376,9 +403,22 @@ void TcpServer::handleFileChunkRequest(quint32 senderId, const QByteArray &body)
         return;
     }
 
+    if(transfer.phase!=TransferPhase::Transferring){
+
+        emit logMessage(QString(
+                "File chunk received after data phase ended "
+                "for transfer %1")
+                .arg(transferId));
+
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::ProtocolError);
+
+        return;
+    }
+
     if(offset!=transfer.nextOffset){
         emit logMessage(QString("Unexpected offset for transfer %1")
                 .arg(transferId));
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
@@ -386,6 +426,7 @@ void TcpServer::handleFileChunkRequest(quint32 senderId, const QByteArray &body)
         ||chunkSize>transfer.fileSize-transfer.nextOffset){
         emit logMessage(QString("File chunk exceeds file size for transfer %1")
                 .arg(transferId));
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
@@ -394,11 +435,13 @@ void TcpServer::handleFileChunkRequest(quint32 senderId, const QByteArray &body)
         ||receiverIt.value().socket->state()!=QAbstractSocket::ConnectedState){
         emit logMessage(QString("Receiver disconnected for transfer %1")
                 .arg(transferId));
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::PeerDisconnected);
         return;
     }
 
     QByteArray chunkBody=Protocol::FileChunkCodec::encode(transferId,offset,chunkData);
     if(chunkBody.isEmpty()){
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
     Protocol::Packet packet;
@@ -408,10 +451,12 @@ void TcpServer::handleFileChunkRequest(quint32 senderId, const QByteArray &body)
     if(receiverIt.value().socket->write(data)<0){
         emit logMessage(QString("Failed to forward file chunk for transfer %1")
                 .arg(transferId));
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::PeerDisconnected);
         return;
     }
 
     transfer.nextOffset+=chunkSize;
+    transfer.lastActivityMs=m_transferClock.elapsed();
 }
 
 void TcpServer::handleFileEndRequest(quint32 senderId, const QByteArray &body)
@@ -421,6 +466,7 @@ void TcpServer::handleFileEndRequest(quint32 senderId, const QByteArray &body)
     if(!Protocol::FileTransferControlCodec::decodeEnd(body,transferId)){
         emit logMessage(QString("Client %1 sent an invalid file end request")
                 .arg(senderId));
+        scheduleClientDisconnect(senderId);
         return;
     }
 
@@ -432,11 +478,23 @@ void TcpServer::handleFileEndRequest(quint32 senderId, const QByteArray &body)
         return;
     }
 
-    const ActiveTransfer&transfer=transferIt.value();
+    ActiveTransfer&transfer=transferIt.value();
 
     if(transfer.senderId!=senderId){
         emit logMessage(QString("Client %1 is not the sender of transfer %2")
                 .arg(senderId).arg(transferId));
+        return;
+    }
+
+    if(transfer.phase!=TransferPhase::Transferring){
+
+        emit logMessage(QString(
+                "File end received after data phase ended "
+                "for transfer %1")
+                .arg(transferId));
+
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::ProtocolError);
+
         return;
     }
 
@@ -445,6 +503,7 @@ void TcpServer::handleFileEndRequest(quint32 senderId, const QByteArray &body)
                 .arg(transferId)
                 .arg(transfer.nextOffset)
                 .arg(transfer.fileSize));
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
@@ -455,6 +514,7 @@ void TcpServer::handleFileEndRequest(quint32 senderId, const QByteArray &body)
         ||receiverIt.value().socket->state()!=QAbstractSocket::ConnectedState){
         emit logMessage(QString("Receiver disconnected for transfer %1")
                 .arg(transferId));
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::PeerDisconnected);
         return;
     }
 
@@ -463,6 +523,7 @@ void TcpServer::handleFileEndRequest(quint32 senderId, const QByteArray &body)
     if(endBody.isEmpty()){
         emit logMessage(QString("Failed to encode file end for transfer %1")
                 .arg(transferId));
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
@@ -476,12 +537,129 @@ void TcpServer::handleFileEndRequest(quint32 senderId, const QByteArray &body)
         emit logMessage(QString("Failed to forward file end for transfer %1: %2")
                 .arg(transferId)
                 .arg(receiverSocket->errorString()));
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::PeerDisconnected);
         return;
     }
 
-    m_activeTransfers.erase(transferIt);
+    transfer.phase=TransferPhase::AwaitingReceiverComplete;
+    transfer.lastActivityMs=m_transferClock.elapsed();
+
     emit logMessage(QString("File transfer %1 data phase completed")
             .arg(transferId));
+}
+
+void TcpServer::handleFileCompleteRequest(quint32 receiverId, const QByteArray &body)
+{
+    QString transferId;
+    if(!Protocol::FileTransferControlCodec::decodeComplete(body,transferId)){
+        emit logMessage(QString(
+                "Client %1 sent an invalid "
+                "file complete request")
+                .arg(receiverId));
+
+        scheduleClientDisconnect(receiverId);
+        return;
+    }
+
+    auto transferIt=m_activeTransfers.find(transferId);
+
+    /*
+     * Complete 可能晚于 Abort / disconnect 到达。
+     * 如果 transfer 已经结束，直接忽略。
+     */
+    if(transferIt==m_activeTransfers.end()){
+
+        emit logMessage(QString(
+                "Unknown file transfer %1 "
+                "in complete request")
+                .arg(transferId));
+
+        return;
+    }
+
+    const ActiveTransfer transfer=transferIt.value();
+
+    /*
+     * 只有真正的 Receiver 才有资格声明文件已经保存成功。
+     */
+    if(receiverId!=transfer.receiverId){
+        emit logMessage(QString(
+                "Client %1 is not the receiver "
+                "of transfer %2")
+                .arg(receiverId).arg(transferId));
+
+        return;
+    }
+
+    /*
+     * Receiver 只能在 Server 已经转发 FileEnd 后声明完成。
+     */
+    if(transfer.phase!=TransferPhase::AwaitingReceiverComplete){
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::ProtocolError);
+        return;
+    }
+
+    /*
+     * Server 自己记录的数据长度也必须完整。
+     */
+    if(transfer.nextOffset!=transfer.fileSize){
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::ProtocolError);
+        return;
+    }
+
+    auto senderIt=m_sessions.find(transfer.senderId);
+
+    /*
+     * Sender 已经不在线，则没有继续保留 AwaitingReceiverComplete 的意义。
+     */
+    if(senderIt==m_sessions.end()||senderIt.value().socket==nullptr||senderIt.value().socket->state()
+               !=QAbstractSocket::ConnectedState){
+
+        m_activeTransfers.erase(transferIt);
+        resumeSenderAfterTransferRemoval(transfer.senderId,transfer.receiverId);
+
+        return;
+    }
+
+    const QByteArray completeBody=Protocol::FileTransferControlCodec::encodeComplete(transferId);
+
+    if(completeBody.isEmpty()){
+        abortTransferFromServer(transferId,Protocol::FileAbortReason::ProtocolError);
+        return;
+    }
+
+    Protocol::Packet packet;
+    packet.type=Protocol::MessageType::FileComplete;
+    packet.body=completeBody;
+
+    const QByteArray data=Protocol::PacketCodec::encode(packet);
+
+    QTcpSocket *senderSocket=senderIt.value().socket;
+
+    if(senderSocket->write(data)<0){
+        /*
+         * Receiver 已经成功保存文件，但 Sender 已无法收到完成通知。
+         *
+         * Server 不应继续永久保存该 transfer。
+         */
+        m_activeTransfers.erase(transferIt);
+        resumeSenderAfterTransferRemoval(transfer.senderId,transfer.receiverId);
+        scheduleClientDisconnect(transfer.senderId);
+
+        return;
+    }
+
+    /*
+     * FileComplete 已成功进入 Sender 的 Socket 写缓冲，
+     * Server 到这里才正式结束该 transfer。
+     */
+    m_activeTransfers.erase(transferIt);
+    resumeSenderAfterTransferRemoval(transfer.senderId,transfer.receiverId);
+
+    emit logMessage(QString(
+            "File transfer %1 completed")
+            .arg(transferId));
+
 }
 
 void TcpServer::cleanupTransfersForClient(quint32 clientId)
@@ -508,7 +686,7 @@ void TcpServer::cleanupTransfersForClient(quint32 clientId)
 
     while(it!=m_activeTransfers.end()){
 
-        const ActiveTransfer &transfer=it.value();
+        const ActiveTransfer transfer=it.value();
 
         if(transfer.receiverId==clientId
             ||transfer.senderId==clientId){
@@ -521,6 +699,10 @@ void TcpServer::cleanupTransfersForClient(quint32 clientId)
 
             const QString transferId=it.key();
 
+            const quint32 peerId=
+                transfer.senderId==clientId?transfer.receiverId
+                                            :transfer.senderId;
+
             emit logMessage(
                 QString(
                     "Removing interrupted file transfer %1 "
@@ -529,6 +711,9 @@ void TcpServer::cleanupTransfersForClient(quint32 clientId)
                     .arg(clientId));
 
             it=m_activeTransfers.erase(it);
+
+            sendFileAbort(peerId,transferId,
+                Protocol::FileAbortReason::PeerDisconnected);
 
         }else{
             ++it;
@@ -549,6 +734,10 @@ bool TcpServer::findBackpressuredReceiver(
          ++transferIt){
 
         const ActiveTransfer &transfer=transferIt.value();
+
+        if(transfer.phase!=TransferPhase::Transferring){
+            continue;
+        }
 
         if(transfer.senderId!=senderId){
             continue;
@@ -577,6 +766,94 @@ bool TcpServer::findBackpressuredReceiver(
     }
 
     return false;
+}
+
+bool TcpServer::hasTransferringDependency(
+    quint32 senderId,quint32 receiverId) const
+{
+    for(auto transferIt=m_activeTransfers.cbegin();
+         transferIt!=m_activeTransfers.cend();
+         ++transferIt){
+
+        const ActiveTransfer &transfer=transferIt.value();
+        if(transfer.phase==TransferPhase::Transferring
+            &&transfer.senderId==senderId
+            &&transfer.receiverId==receiverId){
+
+            return true;
+        }
+    }
+
+    return false;
+}
+
+void TcpServer::resumeSenderAfterTransferRemoval(
+    quint32 senderId,quint32 receiverId)
+{
+    auto senderIt=m_sessions.find(senderId);
+    if(senderIt==m_sessions.end()
+        ||!senderIt.value().readPaused
+        ||senderIt.value().blockedReceiverId!=receiverId
+        ||hasTransferringDependency(senderId,receiverId)){
+
+        return;
+    }
+
+    senderIt.value().readPaused=false;
+    senderIt.value().blockedReceiverId=0;
+    handleClientReadyRead(senderId);
+}
+
+void TcpServer::scheduleClientDisconnect(quint32 clientId)
+{
+    auto clientIt=m_sessions.find(clientId);
+    if(clientIt==m_sessions.end()||clientIt.value().socket==nullptr){
+        return;
+    }
+
+    QTcpSocket *socket=clientIt.value().socket;
+    clientIt.value().readPaused=true;
+    QMetaObject::invokeMethod(socket,[socket](){
+        socket->abort();
+    },Qt::QueuedConnection);
+}
+
+void TcpServer::updateReceiverTransferActivity(quint32 receiverId)
+{
+    const qint64 now=m_transferClock.elapsed();
+    for(auto transferIt=m_activeTransfers.begin();
+         transferIt!=m_activeTransfers.end();
+         ++transferIt){
+
+        if(transferIt.value().receiverId==receiverId
+            &&transferIt.value().phase==TransferPhase::Transferring){
+            transferIt.value().lastActivityMs=now;
+        }
+    }
+}
+
+void TcpServer::checkStalledTransfers()
+{
+    const qint64 now=m_transferClock.elapsed();
+    QStringList stalledTransferIds;
+
+    for(auto transferIt=m_activeTransfers.cbegin();
+         transferIt!=m_activeTransfers.cend();
+         ++transferIt){
+
+        if(now-transferIt.value().lastActivityMs
+            >=TRANSFER_STALL_TIMEOUT_MS){
+
+            stalledTransferIds.append(transferIt.key());
+        }
+    }
+
+    for(const QString &transferId:stalledTransferIds){
+        emit logMessage(QString("File transfer %1 timed out")
+                .arg(transferId));
+        abortTransferFromServer(
+            transferId,Protocol::FileAbortReason::Timeout);
+    }
 }
 
 void TcpServer::resumeSendersForReceiver(quint32 receiverId)
@@ -629,4 +906,97 @@ void TcpServer::resumeSendersForReceiver(quint32 receiverId)
             break;
         }
     }
+}
+
+void TcpServer::handleFileAbortRequest(quint32 clientId, const QByteArray &body)
+{
+    QString transferId;
+    Protocol::FileAbortReason reason=Protocol::FileAbortReason::ProtocolError;
+
+    if(!Protocol::FileTransferControlCodec::decodeAbort(body,transferId,reason)){
+        emit logMessage(QString("Client %1 sent an invalid file abort request")
+                .arg(clientId));
+        scheduleClientDisconnect(clientId);
+        return;
+    }
+
+    auto transferIt=m_activeTransfers.find(transferId);
+    if(transferIt==m_activeTransfers.end()){
+        emit logMessage(QString("Unknown file transfer %1 in abort request")
+                .arg(transferId));
+        return;
+    }
+
+    // 后面要 erase iterator，所以先复制出传输信息。
+    const ActiveTransfer transfer=transferIt.value();
+    if(clientId!=transfer.senderId&&clientId!=transfer.receiverId){
+        emit logMessage(QString("Client %1 is not part of transfer %2")
+                .arg(clientId).arg(transferId));
+        return;
+    }
+
+    const quint32 peerId=
+        clientId==transfer.senderId?transfer.receiverId:transfer.senderId;
+    // Abort 一旦被合法接受，这条 transfer 在 Server 端立即结束。
+    m_activeTransfers.erase(transferIt);
+    sendFileAbort(peerId,transferId,reason);
+    resumeSenderAfterTransferRemoval(transfer.senderId,transfer.receiverId);
+
+    emit logMessage(
+        QString("File transfer %1 aborted by Client %2")
+            .arg(transferId).arg(clientId));
+
+}
+
+bool TcpServer::sendFileAbort(quint32 clientId,
+            const QString &transferId, Protocol::FileAbortReason reason)
+{
+    auto clientIt=m_sessions.find(clientId);
+    if(clientIt==m_sessions.end()){
+        return false;
+    }
+
+    QTcpSocket*socket=clientIt.value().socket;
+    if(socket==nullptr||socket->state()!=QAbstractSocket::ConnectedState){
+        return false;
+    }
+
+    const QByteArray abortBody=Protocol::FileTransferControlCodec::encodeAbort(transferId,reason);
+    if(abortBody.isEmpty()){
+        emit logMessage(QString(
+                "Failed to encode file abort for transfer %1")
+                .arg(transferId));
+        return false;
+    }
+
+    Protocol::Packet packet;
+    packet.body=abortBody;
+    packet.type=Protocol::MessageType::FileAbort;
+
+    QByteArray data=Protocol::PacketCodec::encode(packet);
+    if(socket->write(data)<0){
+        emit logMessage(
+            QString("Failed to send file abort for transfer %1 "
+                "to Client %2: %3")
+                .arg(transferId).arg(clientId)
+                .arg(socket->errorString()));
+        scheduleClientDisconnect(clientId);
+        return false;
+    }
+
+    return true;
+}
+
+void TcpServer::abortTransferFromServer(const QString &transferId, Protocol::FileAbortReason reason)
+{
+    auto transferIt=m_activeTransfers.find(transferId);
+    if(transferIt==m_activeTransfers.end()){
+        return;
+    }
+    const ActiveTransfer transfer=transferIt.value();
+    m_activeTransfers.erase(transferIt);
+
+    sendFileAbort(transfer.senderId,transferId,reason);
+    sendFileAbort(transfer.receiverId,transferId,reason);
+    resumeSenderAfterTransferRemoval(transfer.senderId,transfer.receiverId);
 }

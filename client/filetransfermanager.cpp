@@ -23,6 +23,12 @@ FileTransferManager::FileTransferManager(ConnectionManager*connectionManager,QOb
     connect(m_connectionManager,&ConnectionManager::fileEndReceived,
             this,&FileTransferManager::handleFileEndReceived);
 
+    connect(m_connectionManager,&ConnectionManager::fileAbortReceived,
+            this,&FileTransferManager::handleFileAbortReceived);
+
+    connect(m_connectionManager,&ConnectionManager::fileCompleteReceived,
+            this,&FileTransferManager::handleFileCompleteReceived);
+
     connect(m_connectionManager,&ConnectionManager::disconnected,
             this,&FileTransferManager::handleConnectionDisconnected);
 }
@@ -70,13 +76,13 @@ bool FileTransferManager::sendFile(
     }
 
     m_sendState=SendState::Sending;
-    pumpSendQueue();
-
-    return true;
+    return pumpSendQueue();
 }
 
-QFile *FileTransferManager::createReceiveFile(const QString &fileName)
+QFile *FileTransferManager::createReceiveFile(const QString &fileName,Protocol::FileAbortReason &failureReason)
 {
+    failureReason=Protocol::FileAbortReason::IoError;
+
     QString downloadPath=QStandardPaths::writableLocation(
         QStandardPaths::DownloadLocation);
     if(downloadPath.isEmpty()){
@@ -96,6 +102,7 @@ QFile *FileTransferManager::createReceiveFile(const QString &fileName)
     if(safeFileName.isEmpty()
         ||safeFileName==QStringLiteral(".")
         ||safeFileName==QStringLiteral("..")){
+        failureReason=Protocol::FileAbortReason::ProtocolError;
         return nullptr;
     }
 
@@ -140,6 +147,7 @@ bool FileTransferManager::sendNextChunk()
     }
 
     if(!m_sendFile.isOpen()){
+        abortOutgoingTransfer(Protocol::FileAbortReason::IoError);
         return false;
     }
 
@@ -151,13 +159,13 @@ bool FileTransferManager::sendNextChunk()
     QByteArray chunkData=m_sendFile.read(bytesToRead);
 
     if(static_cast<qint64>(chunkData.size())!=bytesToRead){
-        m_sendFile.seek(m_sendOffset);
+        abortOutgoingTransfer(Protocol::FileAbortReason::IoError);
         return false;
     }
 
     if(!m_connectionManager->sendFileChunkRequest(
             m_sendTransferId,m_sendOffset,chunkData)){
-        m_sendFile.seek(m_sendOffset);
+        abortOutgoingTransfer(Protocol::FileAbortReason::PeerDisconnected);
         return false;
     }
 
@@ -168,27 +176,29 @@ bool FileTransferManager::sendNextChunk()
     return true;
 }
 
-void FileTransferManager::pumpSendQueue()
+bool FileTransferManager::pumpSendQueue()
 {
     if(m_sendState!=SendState::Sending){
-        return;
+        return false;
     }
 
     if(!m_sendFile.isOpen()){
-        return;
+        abortOutgoingTransfer(Protocol::FileAbortReason::IoError);
+        return false;
     }
 
     while(m_sendOffset<m_sendFileSize
            &&m_connectionManager->pendingBytesToWrite()<SEND_HIGH_WATER_MARK){
         if(!sendNextChunk()){
-            resetSendTransfer();
-            return;
+            return false;
         }
     }
 
     if(m_sendOffset==m_sendFileSize){
-        finishSendTransfer();
+        return finishSendTransfer();
     }
+
+    return true;
 }
 
 bool FileTransferManager::finishSendTransfer()
@@ -198,6 +208,7 @@ bool FileTransferManager::finishSendTransfer()
     }
 
     if(m_sendOffset!=m_sendFileSize){
+        abortOutgoingTransfer(Protocol::FileAbortReason::ProtocolError);
         return false;
     }
 
@@ -208,12 +219,8 @@ bool FileTransferManager::finishSendTransfer()
     m_sendState=SendState::Finishing;
 
     if(!m_connectionManager->sendFileEndRequest(m_sendTransferId)){
-        resetSendTransfer();
+        abortOutgoingTransfer(Protocol::FileAbortReason::PeerDisconnected);
         return false;
-    }
-
-    if(m_connectionManager->pendingBytesToWrite()==0){
-        resetSendTransfer();
     }
 
     return true;
@@ -231,15 +238,85 @@ void FileTransferManager::resetSendTransfer()
     m_sendState=SendState::Idle;
 }
 
+void FileTransferManager::abortOutgoingTransfer(Protocol::FileAbortReason reason)
+{
+    if(m_sendState==SendState::Idle||m_sendTransferId.isEmpty()){
+        return;
+    }
+
+    const QString transferId=m_sendTransferId;
+
+    /*
+     * 先结束本地发送状态。
+     * 即使 AbortRequest 发送失败，也不能继续使用已经失败的任务。
+     */
+    resetSendTransfer();
+
+    if(!m_connectionManager->sendFileAbortRequest(transferId,reason)){
+        m_connectionManager->disconnectFromServer();
+    }
+}
+
+void FileTransferManager::cleanupIncomingTransfer(const QString &transferId)
+{
+    auto transferIt=m_incomingTransfers.find(transferId);
+
+    if(transferIt==m_incomingTransfers.end()){
+        return;
+    }
+
+    QFile *file=transferIt.value().file;
+
+    QString filePath;
+
+    if(file!=nullptr){
+        filePath=file->fileName();
+    }
+
+    /*
+     * 先移除业务状态，
+     * 防止后续到达的旧 Chunk 继续使用这次接收任务。
+     */
+    m_incomingTransfers.erase(transferIt);
+
+    if(file==nullptr){
+        return;
+    }
+
+    if(file->isOpen()){
+        file->close();
+    }
+
+    file->deleteLater();
+
+    if(!filePath.isEmpty()){
+        QFile::remove(filePath);
+    }
+}
+
+void FileTransferManager::abortIncomingTransfer(const QString &transferId, Protocol::FileAbortReason reason)
+{
+    cleanupIncomingTransfer(transferId);
+
+    if(!m_connectionManager->sendFileAbortRequest(transferId,reason)){
+        m_connectionManager->disconnectFromServer();
+    }
+}
+
 void FileTransferManager::handleFileStartReceived(
     quint32 senderId, const QString &transferId, const QString &fileName, qint64 fileSize)
 {
     if(m_incomingTransfers.contains(transferId)){
+        abortIncomingTransfer(transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
-    QFile *file=createReceiveFile(fileName);
+    Protocol::FileAbortReason failureReason=Protocol::FileAbortReason::IoError;
+    QFile *file=createReceiveFile(fileName,failureReason);
     if(file==nullptr){
+        if(!m_connectionManager->sendFileAbortRequest(transferId,failureReason)){
+            m_connectionManager->disconnectFromServer();
+        }
         return;
     }
 
@@ -262,6 +339,7 @@ void FileTransferManager::handleFileChunkReceived(
 
     IncomingTransfer &transfer=transferIt.value();
     if(offset!=transfer.nextOffset){
+        abortIncomingTransfer(transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
@@ -269,10 +347,12 @@ void FileTransferManager::handleFileChunkReceived(
 
     if(transfer.nextOffset>transfer.fileSize
         ||chunkSize>transfer.fileSize-transfer.nextOffset){
+        abortIncomingTransfer(transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
     if(transfer.file==nullptr||!transfer.file->isOpen()){
+        abortIncomingTransfer(transferId,Protocol::FileAbortReason::IoError);
         return;
     }
 
@@ -281,6 +361,7 @@ void FileTransferManager::handleFileChunkReceived(
         const qint64 written=transfer.file->write(chunkData.constData()+totalWritten,
                                                     chunkSize-totalWritten);
         if(written<=0){
+            abortIncomingTransfer(transferId,Protocol::FileAbortReason::IoError);
             return;
         }
         totalWritten+=written;
@@ -294,11 +375,6 @@ void FileTransferManager::handleSocketBytesWritten(qint64 bytes)
     Q_UNUSED(bytes);
     if(m_sendState==SendState::Sending){
         pumpSendQueue();
-        return;
-    }
-
-    if(m_sendState==SendState::Finishing&&m_connectionManager->pendingBytesToWrite()==0){
-        resetSendTransfer();
     }
 }
 
@@ -313,27 +389,19 @@ void FileTransferManager::handleFileEndReceived(const QString &transferId)
 
     QFile*file=transfer.file;
     if(file==nullptr){
-        m_incomingTransfers.erase(transferIt);
+        abortIncomingTransfer(transferId,Protocol::FileAbortReason::IoError);
         return;
     }
 
     const QString filePath=file->fileName();
 
     if(transfer.nextOffset!=transfer.fileSize){
-        if(file->isOpen()){
-            file->close();
-        }
-        file->deleteLater();
-        m_incomingTransfers.erase(transferIt);
-        QFile::remove(filePath);
+        abortIncomingTransfer(transferId,Protocol::FileAbortReason::ProtocolError);
         return;
     }
 
     if(!file->flush()){
-        file->close();
-        file->deleteLater();
-        m_incomingTransfers.erase(transferIt);
-        QFile::remove(filePath);
+        abortIncomingTransfer(transferId,Protocol::FileAbortReason::IoError);
         return;
     }
 
@@ -341,6 +409,40 @@ void FileTransferManager::handleFileEndReceived(const QString &transferId)
     file->deleteLater();
     m_incomingTransfers.erase(transferIt);
     emit fileReceiveCompleted(filePath);
+
+    if(!m_connectionManager->sendFileCompleteRequest(transferId)){
+        m_connectionManager->disconnectFromServer();
+    }
+}
+
+void FileTransferManager::handleFileCompleteReceived(const QString &transferId)
+{
+    if(m_sendState==SendState::Finishing
+        &&m_sendTransferId==transferId){
+
+        resetSendTransfer();
+    }
+}
+
+void FileTransferManager::handleFileAbortReceived(const QString &transferId, Protocol::FileAbortReason reason)
+{
+    Q_UNUSED(reason);
+
+    /*
+     * 当前 Client 是该 transfer 的 Sender。
+     */
+    if(m_sendState!=SendState::Idle&&m_sendTransferId==transferId){
+        resetSendTransfer();
+        return;
+    }
+
+    /*
+     * 当前 Client 是该 transfer 的 Receiver。
+     */
+    if(m_incomingTransfers.contains(transferId)){
+
+        cleanupIncomingTransfer(transferId);
+    }
 }
 
 

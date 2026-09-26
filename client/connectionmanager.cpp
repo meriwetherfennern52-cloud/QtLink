@@ -109,6 +109,35 @@ bool ConnectionManager::sendFileEndRequest(const QString &transferId)
     return writePacket(packet);
 }
 
+bool ConnectionManager::sendFileAbortRequest(const QString &transferId, Protocol::FileAbortReason reason)
+{
+    const QByteArray body=Protocol::FileTransferControlCodec::encodeAbort(transferId,reason);
+
+    if(body.isEmpty()){
+        return false;
+    }
+
+    Protocol::Packet packet;
+    packet.type=Protocol::MessageType::FileAbortRequest;
+    packet.body=body;
+
+    return writePacket(packet);
+}
+
+bool ConnectionManager::sendFileCompleteRequest(const QString &transferId)
+{
+    const QByteArray body=Protocol::FileTransferControlCodec::encodeComplete(transferId);
+    if(body.isEmpty()){
+        return false;
+    }
+
+    Protocol::Packet packet;
+    packet.type=Protocol::MessageType::FileCompleteRequest;
+    packet.body=body;
+
+    return writePacket(packet);
+}
+
 void ConnectionManager::handleReadyRead()
 {
     QByteArray newData=m_socket->readAll();
@@ -189,6 +218,31 @@ void ConnectionManager::handleReadyRead()
                 break;
             }
             emit fileEndReceived(transferId);
+            break;
+        }
+        case Protocol::MessageType::FileAbort:{
+            QString transferId;
+
+            Protocol::FileAbortReason reason=Protocol::FileAbortReason::ProtocolError;
+
+            if(!Protocol::FileTransferControlCodec::decodeAbort(packet.body,transferId,reason)){
+                emit operationError("Invalid file abort message from server.");
+                disconnectFromServer();
+                return;
+            }
+
+            emit fileAbortReceived(transferId,reason);
+            break;
+        }
+        case Protocol::MessageType::FileComplete:{
+            QString transferId;
+            if(!Protocol::FileTransferControlCodec::decodeComplete(packet.body,transferId)){
+                emit operationError("Invalid file complete message from server.");
+                disconnectFromServer();
+                return;
+            }
+
+            emit fileCompleteReceived(transferId);
             break;
         }
         default:

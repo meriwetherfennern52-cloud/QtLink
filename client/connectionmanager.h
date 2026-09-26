@@ -5,6 +5,7 @@
 // #include <QTcpSocket>
 #include <QByteArray>
 #include<QList>
+#include"protocol.h"
 class QTcpSocket; //前置声明，.cpp里再写↑，减少头文件之间的耦合和不必要的编译依赖
 namespace Protocol{
 struct Packet;
@@ -41,6 +42,8 @@ public:
      * @brief 主动断开当前服务器连接。
      */
     void disconnectFromServer();
+
+    // -----------------------------------------------------------------
 
     /**
     * @brief 向指定在线客户端发送文本消息请求。
@@ -85,6 +88,22 @@ public:
     */
     bool sendFileEndRequest(const QString&transferId);
 
+    /**
+    * @brief 向服务端发送文件传输终止请求。
+    *
+    * @param transferId 文件传输唯一标识。
+    * @param reason 文件传输终止原因。
+    * @return 消息成功提交到本地 Socket 写缓冲时返回 true，否则返回 false。
+    */
+    bool sendFileAbortRequest(const QString &transferId,Protocol::FileAbortReason reason);
+
+    /**
+    * @brief 向服务端发送文件接收完成确认。
+    * @param transferId 文件传输唯一标识。
+    * @return 消息成功提交到本地 Socket 写缓冲时返回 true，否则返回 false。
+    */
+    bool sendFileCompleteRequest(const QString &transferId);
+
 signals:
     /**
      * @brief TCP 连接建立成功。
@@ -109,6 +128,8 @@ signals:
     * @param message 错误描述。
     */
     void operationError(const QString &message);
+
+// ----------------------------------------------------------
 
     /**
     * @brief 通知上层收到一条服务器下发的文本消息。
@@ -157,6 +178,20 @@ signals:
     * @param transferId 本次文件传输唯一标识。
     */
     void fileEndReceived(const QString&transferId);
+
+    /**
+    * @brief 收到服务端转发的文件传输终止通知。
+    *
+    * @param transferId 被终止的文件传输唯一标识。
+    * @param reason 文件传输终止原因。
+    */
+    void fileAbortReceived(const QString &transferId,Protocol::FileAbortReason reason);
+
+    /**
+    * @brief 收到服务端下发的文件传输完成通知。
+    * @param transferId 已完成的文件传输唯一标识。
+    */
+    void fileCompleteReceived(const QString &transferId);
 
 private slots:
     /**

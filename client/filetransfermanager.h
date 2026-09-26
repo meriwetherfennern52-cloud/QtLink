@@ -4,6 +4,7 @@
 #include <QFile>
 #include<QObject>
 #include<QHash>
+#include"protocol.h"
 
 class ConnectionManager;
 
@@ -28,11 +29,12 @@ public:
 
 private:
     /**
-     * @brief 使用安全且不重名的路径原子创建接收文件。
-     * @param fileName 网络消息中的文件名。
-     * @return 已打开的接收文件，失败时返回 nullptr。
-     */
-    QFile *createReceiveFile(const QString &fileName);
+    * @brief 使用安全且不重名的路径原子创建接收文件。
+    * @param fileName 网络消息中的文件名。
+    * @param failureReason 创建失败时返回对应的终止原因。
+    * @return 已打开的接收文件，失败时返回 nullptr。
+    */
+    QFile *createReceiveFile(const QString &fileName,Protocol::FileAbortReason &failureReason);
 
     /**
     * @brief 读取并发送当前文件的下一个数据块。
@@ -46,7 +48,7 @@ private:
     * 当待发送字节低于高水位时继续读取并发送 Chunk；
     * 达到高水位或文件数据全部入队后停止。
     */
-    void pumpSendQueue();
+    bool pumpSendQueue();
 
     /**
     * @brief 将当前发送任务的 FileEndRequest 加入网络发送流程。
@@ -58,6 +60,34 @@ private:
     * @brief 清理当前主动文件发送任务并恢复 Idle 状态。
     */
     void resetSendTransfer();
+
+    /**
+    * @brief 因本地发送异常终止当前主动文件传输。
+    *
+    * 清理当前发送状态，并向服务端发送 FileAbortRequest。
+    *
+    * @param reason 文件传输终止原因。
+    */
+    void abortOutgoingTransfer(Protocol::FileAbortReason reason);
+
+    /**
+    * @brief 清理指定的本地接收任务及其残缺文件。
+    *
+    * 该函数只执行本地清理，不向服务端发送 FileAbortRequest。
+    *
+    * @param transferId 要清理的文件传输唯一标识。
+    */
+    void cleanupIncomingTransfer(const QString &transferId);
+
+    /**
+    * @brief 因本地接收异常终止指定文件传输。
+    *
+    * 删除本地残缺文件并向服务端发送 FileAbortRequest。
+    *
+    * @param transferId 文件传输唯一标识。
+    * @param reason 文件传输终止原因。
+    */
+    void abortIncomingTransfer(const QString &transferId,Protocol::FileAbortReason reason);
 
 signals:
     /**
@@ -104,6 +134,22 @@ private slots:
     * @param transferId 本次文件传输唯一标识。
     */
     void handleFileEndReceived(const QString &transferId);
+
+    /**
+    * @brief 处理服务器下发的文件传输终止通知。
+    *
+    * 只清理本地传输状态，不再次发送 FileAbortRequest。
+    *
+    * @param transferId 被终止的文件传输唯一标识。
+    * @param reason 文件传输终止原因。
+    */
+    void handleFileAbortReceived(const QString &transferId,Protocol::FileAbortReason reason);
+
+    /**
+    * @brief 处理服务器下发的文件传输完成通知。
+    * @param transferId 已完成的文件传输唯一标识。
+    */
+    void handleFileCompleteReceived(const QString &transferId);
 
     /**
     * @brief 处理服务器连接断开事件，并终止当前所有文件传输。

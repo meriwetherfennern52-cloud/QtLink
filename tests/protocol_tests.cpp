@@ -10,6 +10,8 @@
 #include "filetransfercontrolcodec.h"
 #include "filechunkcodec.h"
 
+Q_DECLARE_METATYPE(Protocol::FileAbortReason)
+
 namespace {
 
 const QString fileTransferId =
@@ -116,6 +118,13 @@ private slots:
     void fileEndRoundTrip();
     void fileEndRejectsInvalidData_data();
     void fileEndRejectsInvalidData();
+    void fileAbortRoundTrip_data();
+    void fileAbortRoundTrip();
+    void fileAbortRejectsInvalidData_data();
+    void fileAbortRejectsInvalidData();
+    void fileCompleteRoundTrip();
+    void fileCompleteRejectsInvalidData_data();
+    void fileCompleteRejectsInvalidData();
     void fileChunkRoundTrip_data();
     void fileChunkRoundTrip();
     void fileChunkRejectsInvalidData_data();
@@ -948,6 +957,100 @@ void ProtocolTests::fileEndRejectsInvalidData()
     QCOMPARE(transferId, QStringLiteral("unchanged-transfer"));
 }
 
+void ProtocolTests::fileAbortRoundTrip_data()
+{
+    QTest::addColumn<Protocol::FileAbortReason>("originalReason");
+
+    QTest::newRow("peer-disconnected")
+        << Protocol::FileAbortReason::PeerDisconnected;
+    QTest::newRow("io-error")
+        << Protocol::FileAbortReason::IoError;
+    QTest::newRow("cancelled")
+        << Protocol::FileAbortReason::Cancelled;
+    QTest::newRow("protocol-error")
+        << Protocol::FileAbortReason::ProtocolError;
+    QTest::newRow("timeout")
+        << Protocol::FileAbortReason::Timeout;
+}
+
+void ProtocolTests::fileAbortRoundTrip()
+{
+    QFETCH(Protocol::FileAbortReason, originalReason);
+
+    const QByteArray data=
+        Protocol::FileTransferControlCodec::encodeAbort(
+            fileTransferId,originalReason);
+    QVERIFY(!data.isEmpty());
+
+    QString transferId;
+    Protocol::FileAbortReason reason=Protocol::FileAbortReason::ProtocolError;
+    QVERIFY(Protocol::FileTransferControlCodec::decodeAbort(
+        data,transferId,reason));
+    QCOMPARE(transferId,fileTransferId);
+    QCOMPARE(reason,originalReason);
+}
+
+void ProtocolTests::fileAbortRejectsInvalidData_data()
+{
+    QTest::addColumn<QByteArray>("data");
+
+    QTest::newRow("invalid-json") << QByteArray("{");
+    QTest::newRow("root-not-object") << QByteArray("[]");
+    QTest::newRow("missing-transfer-id")
+        << QByteArray(R"({"reason":1})");
+    QTest::newRow("transfer-id-number")
+        << QByteArray(R"({"transferId":123,"reason":1})");
+    QTest::newRow("invalid-uuid")
+        << QByteArray(R"({"transferId":"invalid","reason":1})");
+    QTest::newRow("missing-reason")
+        << QByteArray(R"({"transferId":"550e8400-e29b-41d4-a716-446655440000"})");
+    QTest::newRow("reason-string")
+        << QByteArray(R"({"transferId":"550e8400-e29b-41d4-a716-446655440000","reason":"1"})");
+    QTest::newRow("reason-fractional")
+        << QByteArray(R"({"transferId":"550e8400-e29b-41d4-a716-446655440000","reason":1.5})");
+    QTest::newRow("reason-zero")
+        << QByteArray(R"({"transferId":"550e8400-e29b-41d4-a716-446655440000","reason":0})");
+    QTest::newRow("reason-undefined")
+        << QByteArray(R"({"transferId":"550e8400-e29b-41d4-a716-446655440000","reason":6})");
+}
+
+void ProtocolTests::fileAbortRejectsInvalidData()
+{
+    QFETCH(QByteArray, data);
+
+    QString transferId=QStringLiteral("unchanged-transfer");
+    Protocol::FileAbortReason reason=Protocol::FileAbortReason::Cancelled;
+    QVERIFY(!Protocol::FileTransferControlCodec::decodeAbort(
+        data,transferId,reason));
+    QCOMPARE(transferId,QStringLiteral("unchanged-transfer"));
+    QCOMPARE(reason,Protocol::FileAbortReason::Cancelled);
+}
+
+void ProtocolTests::fileCompleteRoundTrip()
+{
+    const QByteArray data=
+        Protocol::FileTransferControlCodec::encodeComplete(fileTransferId);
+    QVERIFY(!data.isEmpty());
+
+    QString transferId;
+    QVERIFY(Protocol::FileTransferControlCodec::decodeComplete(data,transferId));
+    QCOMPARE(transferId,fileTransferId);
+}
+
+void ProtocolTests::fileCompleteRejectsInvalidData_data()
+{
+    fileEndRejectsInvalidData_data();
+}
+
+void ProtocolTests::fileCompleteRejectsInvalidData()
+{
+    QFETCH(QByteArray, data);
+    QString transferId=QStringLiteral("unchanged-transfer");
+
+    QVERIFY(!Protocol::FileTransferControlCodec::decodeComplete(data,transferId));
+    QCOMPARE(transferId,QStringLiteral("unchanged-transfer"));
+}
+
 void ProtocolTests::fileChunkRoundTrip_data()
 {
     QTest::addColumn<qint64>("originalOffset");
@@ -1049,6 +1152,14 @@ void ProtocolTests::fileMessageTypesAreValid_data()
         << static_cast<quint16>(Protocol::MessageType::FileEndRequest) << quint16(8);
     QTest::newRow("FileEnd")
         << static_cast<quint16>(Protocol::MessageType::FileEnd) << quint16(9);
+    QTest::newRow("FileAbortRequest")
+        << static_cast<quint16>(Protocol::MessageType::FileAbortRequest) << quint16(10);
+    QTest::newRow("FileAbort")
+        << static_cast<quint16>(Protocol::MessageType::FileAbort) << quint16(11);
+    QTest::newRow("FileCompleteRequest")
+        << static_cast<quint16>(Protocol::MessageType::FileCompleteRequest) << quint16(12);
+    QTest::newRow("FileComplete")
+        << static_cast<quint16>(Protocol::MessageType::FileComplete) << quint16(13);
 }
 
 void ProtocolTests::fileMessageTypesAreValid()
@@ -1062,7 +1173,7 @@ void ProtocolTests::fileMessageTypesAreValid()
 
 void ProtocolTests::messageTypeRejectsUndefinedValue()
 {
-    QVERIFY(!Protocol::isValidMessageType(quint16(10)));
+    QVERIFY(!Protocol::isValidMessageType(quint16(14)));
 }
 
 QTEST_APPLESS_MAIN(ProtocolTests)

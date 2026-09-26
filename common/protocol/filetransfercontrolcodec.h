@@ -2,6 +2,8 @@
 #define FILETRANSFERCONTROLCODEC_H
 
 #include<QByteArray>
+#include"protocol.h"
+
 namespace Protocol{
 
 class FileTransferControlCodec
@@ -79,6 +81,41 @@ public:
      * @return 解码成功返回 true，否则返回 false。
      */
     static bool decodeEnd(const QByteArray &data,QString &transferId);
+
+    /**
+    * @brief 编码 FileAbortRequest 和 FileAbort 共用的消息体。
+    *
+    * @param transferId 本次文件传输的唯一标识。
+    * @param reason 文件传输终止原因。
+    * @return 编码后的 JSON 字节数据；参数非法时返回空 QByteArray。
+    */
+    static QByteArray encodeAbort(const QString&transferId,FileAbortReason reason);
+
+    /**
+    * @brief 解码 FileAbortRequest 和 FileAbort 共用的消息体。
+    *
+    * @param data JSON 字节数据。
+    * @param transferId 用于接收文件传输标识，失败时保持原值。
+    * @param reason 用于接收文件传输终止原因，失败时保持原值。
+    * @return 解码成功返回 true，否则返回 false。
+    */
+    static bool decodeAbort(const QByteArray&data,
+                            QString&transferId,FileAbortReason&reason);
+
+    /**
+    * @brief 编码文件接收完成确认。
+    * @param transferId 文件传输唯一标识。
+    * @return 编码后的 JSON 数据，参数非法时返回空 QByteArray。
+    */
+    static QByteArray encodeComplete(const QString &transferId);
+
+    /**
+    * @brief 解码文件接收完成确认。
+    * @param data 编码后的 JSON 数据。
+    * @param transferId 成功时输出规范化后的文件传输 ID。
+    * @return 解码成功返回 true，否则返回 false。
+    */
+    static bool decodeComplete(const QByteArray &data,QString &transferId);
 };
 
 };
