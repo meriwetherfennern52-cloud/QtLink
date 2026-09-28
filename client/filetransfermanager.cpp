@@ -253,7 +253,7 @@ void FileTransferManager::abortOutgoingTransfer(Protocol::FileAbortReason reason
     resetSendTransfer();
 
     if(!m_connectionManager->sendFileAbortRequest(transferId,reason)){
-        m_connectionManager->disconnectFromServer();
+        m_connectionManager->abortConnectionForReconnect();
     }
 }
 
@@ -299,7 +299,7 @@ void FileTransferManager::abortIncomingTransfer(const QString &transferId, Proto
     cleanupIncomingTransfer(transferId);
 
     if(!m_connectionManager->sendFileAbortRequest(transferId,reason)){
-        m_connectionManager->disconnectFromServer();
+        m_connectionManager->abortConnectionForReconnect();
     }
 }
 
@@ -315,7 +315,7 @@ void FileTransferManager::handleFileStartReceived(
     QFile *file=createReceiveFile(fileName,failureReason);
     if(file==nullptr){
         if(!m_connectionManager->sendFileAbortRequest(transferId,failureReason)){
-            m_connectionManager->disconnectFromServer();
+            m_connectionManager->abortConnectionForReconnect();
         }
         return;
     }
@@ -411,7 +411,7 @@ void FileTransferManager::handleFileEndReceived(const QString &transferId)
     emit fileReceiveCompleted(filePath);
 
     if(!m_connectionManager->sendFileCompleteRequest(transferId)){
-        m_connectionManager->disconnectFromServer();
+        m_connectionManager->abortConnectionForReconnect();
     }
 }
 

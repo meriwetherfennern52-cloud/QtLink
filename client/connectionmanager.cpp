@@ -13,19 +13,30 @@
 ConnectionManager::ConnectionManager(QObject *parent)
     : QObject{parent},m_socket(new QTcpSocket(this))
     ,m_heartbeatTimer(new QTimer(this))
+    ,m_reconnectTimer(new QTimer(this))
 {
     connect(m_socket,&QTcpSocket::connected,this,&ConnectionManager::handleSocketConnected);
     connect(m_heartbeatTimer,&QTimer::timeout,this,&ConnectionManager::handleHeartbeatTimer);
 
     connect(m_socket,&QTcpSocket::disconnected,this,&ConnectionManager::handleSocketDisconnected);
     connect(m_socket,&QTcpSocket::errorOccurred,this,[this](QAbstractSocket::SocketError error){
+        Q_UNUSED(error);
         emit connectionError(m_socket->errorString());
+    });
+    connect(m_socket,&QTcpSocket::stateChanged,
+            this,[this](QAbstractSocket::SocketState state){
+        if(state==QAbstractSocket::UnconnectedState&&m_connectionDesired){
+            scheduleReconnect();
+        }
     });
 
     connect(m_socket,&QTcpSocket::readyRead,this,&ConnectionManager::handleReadyRead);
     connect(m_socket,&QTcpSocket::bytesWritten,this,[this](qint64 bytes){
         emit socketBytesWritten(bytes);
     });
+
+    m_reconnectTimer->setSingleShot(true);
+    connect(m_reconnectTimer,&QTimer::timeout,this,&ConnectionManager::attemptReconnect);
 }
 
 void ConnectionManager::connectToServer(const QString &host, quint16 port)
@@ -34,13 +45,39 @@ void ConnectionManager::connectToServer(const QString &host, quint16 port)
         emit connectionError("Connection is already active");
         return;
     }
+
     m_receiveBuffer.clear();
+    m_reconnectTimer->stop();
+    m_reconnectDelayMs=INITIAL_RECONNECT_DELAY_MS;
+    m_connectionDesired=true;
+    m_host=host;
+    m_port=port;
+    setConnectionState(ConnectionState::Connecting);
+
     m_socket->connectToHost(host,port);
 }
 
 void ConnectionManager::disconnectFromServer()
 {
-    m_socket->disconnectFromHost();
+    m_connectionDesired=false;
+    m_reconnectTimer->stop();
+
+    setConnectionState(ConnectionState::Disconnected);
+
+    if(m_socket->state()!=QAbstractSocket::UnconnectedState){
+        m_socket->abort();
+    }
+}
+
+void ConnectionManager::abortConnectionForReconnect()
+{
+    m_heartbeatTimer->stop();
+
+    if(m_socket->state()!=QAbstractSocket::UnconnectedState){
+        m_socket->abort();
+    }else{
+        scheduleReconnect();
+    }
 }
 
 bool ConnectionManager::sendTextMessage(quint32 receiverId,const QString &text)
@@ -260,7 +297,7 @@ void ConnectionManager::handleReadyRead()
         case Protocol::MessageType::HeartbeatResponse:{
             if(!packet.body.isEmpty()){
                 emit operationError("Invalid heartbeat response from server.");
-                m_socket->abort();
+                disconnectFromServer();
                 return;
             }
             m_lastServerActivityMs=m_connectionClock.elapsed();
@@ -268,7 +305,7 @@ void ConnectionManager::handleReadyRead()
         }
         default:
             emit operationError(QStringLiteral("Unexpected message type from server."));
-            m_socket->abort();
+            disconnectFromServer();
             return;
         }
 
@@ -281,14 +318,28 @@ void ConnectionManager::handleSocketDisconnected()
     m_heartbeatTimer->stop();
     m_receiveBuffer.clear();
     emit disconnected();
+    if(m_connectionDesired){
+        scheduleReconnect();
+    }else{
+        setConnectionState(ConnectionState::Disconnected);
+    }
 }
 
 void ConnectionManager::handleSocketConnected()
 {
+    if(!m_connectionDesired){
+        m_socket->abort();
+        return;
+    }
+
     m_connectionClock.start();
     m_lastServerActivityMs=0;
 
     m_heartbeatTimer->start(HEARTBEAT_INTERVAL_MS);
+
+    setConnectionState(ConnectionState::Connected);
+    m_reconnectTimer->stop();
+    m_reconnectDelayMs=INITIAL_RECONNECT_DELAY_MS;
 
     emit connected();
 }
@@ -303,14 +354,12 @@ void ConnectionManager::handleHeartbeatTimer()
     const qint64 now=m_connectionClock.elapsed();
     if(now-m_lastServerActivityMs>=SERVER_TIMEOUT_MS){
         emit connectionError("Server heartbeat timed out.");
-        m_heartbeatTimer->stop();
-        m_socket->abort();
+        abortConnectionForReconnect();
         return;
     }
 
     if(!sendHeartbeatRequest()){
-        m_heartbeatTimer->stop();
-        m_socket->abort();
+        abortConnectionForReconnect();
     }
 }
 
@@ -342,4 +391,49 @@ bool ConnectionManager::sendHeartbeatRequest()
     packet.body.clear();
 
     return writePacket(packet);
+}
+
+void ConnectionManager::attemptReconnect()
+{
+    if(!m_connectionDesired){
+        return;
+    }
+
+    if(m_socket->state()!=QAbstractSocket::UnconnectedState){
+        return;
+    }
+
+    setConnectionState(ConnectionState::Connecting);
+
+    m_receiveBuffer.clear();
+    m_socket->connectToHost(m_host,m_port);
+}
+
+void ConnectionManager::scheduleReconnect()
+{
+    if(!m_connectionDesired){
+        return;
+    }
+
+    if(m_socket->state()!=QAbstractSocket::UnconnectedState){
+        return;
+    }
+
+    if(m_reconnectTimer->isActive()){
+        return;
+    }
+
+    setConnectionState(ConnectionState::Reconnecting);
+
+    m_reconnectTimer->start(m_reconnectDelayMs);
+    m_reconnectDelayMs=qMin(m_reconnectDelayMs*2,MAX_RECONNECT_DELAY_MS);
+}
+
+void ConnectionManager::setConnectionState(ConnectionState state)
+{
+    if(m_connectionState==state){
+        return;
+    }
+    m_connectionState=state;
+    emit connectionStateChanged(state);
 }

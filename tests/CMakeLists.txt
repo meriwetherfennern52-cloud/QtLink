@@ -39,3 +39,26 @@ add_test(
     NAME stage12_tests
     COMMAND stage12_tests
 )
+
+add_executable(stage14_tests
+    stage14_tests.cpp
+    ../client/connectionmanager.cpp
+    ../client/filetransfermanager.cpp
+)
+
+target_include_directories(stage14_tests
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/client
+)
+
+target_link_libraries(stage14_tests
+    PRIVATE
+        Qt${QT_VERSION_MAJOR}::Test
+        Qt${QT_VERSION_MAJOR}::Network
+        qtlink_protocol
+)
+
+add_test(
+    NAME stage14_tests
+    COMMAND stage14_tests
+)

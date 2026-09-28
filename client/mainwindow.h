@@ -4,7 +4,7 @@
 #include "databasemanager.h"
 
 #include <QMainWindow>
-
+#include"connectionmanager.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -12,7 +12,6 @@ class MainWindow;
 }
 QT_END_NAMESPACE
 
-class ConnectionManager;
 class FileTransferManager;
 
 /**
@@ -40,13 +39,17 @@ private slots:
 
     void on_disconnectBtn_clicked();
 
-    void handleConnected();
-
     void handleDisconnected();
 
     void handleConnectionError(const QString &message);
 
     void on_sendBtn_clicked();
+
+    /**
+     * @brief 根据客户端连接状态更新界面控件。
+     * @param state 当前连接生命周期状态。
+     */
+    void handleConnectionStateChanged(ConnectionManager::ConnectionState state);
 
     /**
     * @brief 处理服务器下发的文本消息。

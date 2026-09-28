@@ -24,7 +24,6 @@ struct Packet;
  * 当前类不负责：
  * - UI 展示
  * - 本地数据库持久化
- * - 自动重连
  * - 文件传输
  */
 class ConnectionManager : public QObject
@@ -32,6 +31,14 @@ class ConnectionManager : public QObject
     Q_OBJECT
 public:
     explicit ConnectionManager(QObject *parent = nullptr);
+
+    enum class ConnectionState{
+        Disconnected,
+        Connecting,
+        Connected,
+        Reconnecting
+    };
+    Q_ENUM(ConnectionState)
 
     /**
      * @brief 发起到服务器的异步连接。
@@ -44,6 +51,11 @@ public:
      * @brief 主动断开当前服务器连接。
      */
     void disconnectFromServer();
+
+    /**
+     * @brief 因连接异常立即终止当前 Socket，并保留自动重连意图。
+     */
+    void abortConnectionForReconnect();
 
     // -----------------------------------------------------------------
 
@@ -195,6 +207,11 @@ signals:
     */
     void fileCompleteReceived(const QString &transferId);
 
+    /**
+    * @brief 通知上层连接生命周期状态发生变化。
+    * @param state 新的连接状态。
+    */
+    void connectionStateChanged(ConnectionState state);
 
 private slots:
     /**
@@ -237,6 +254,22 @@ private:
     */
     bool sendHeartbeatRequest();
 
+    /**
+    * @brief 在重连等待结束后尝试重新连接服务器。
+    */
+    void attemptReconnect();
+
+    /**
+    * @brief 按当前指数退避时间安排下一次自动重连。
+    */
+    void scheduleReconnect();
+
+    /**
+    * @brief 更新连接状态，并在状态真正变化时通知上层。
+    */
+    void setConnectionState(ConnectionState state);
+
+
     QTcpSocket*m_socket;
     QByteArray m_receiveBuffer;
 
@@ -244,10 +277,33 @@ private:
     QElapsedTimer m_connectionClock;
     qint64 m_lastServerActivityMs{0};
 
+    QString m_host;
+    quint16 m_port{0};
+    /**
+    * @brief 等待下一次自动重连的单次定时器。
+    */
+    QTimer *m_reconnectTimer;
+
+    /**
+    * @brief 下一次自动重连前的等待时间，单位毫秒。
+    */
+    int m_reconnectDelayMs{1000};
+
+    /**
+    * @brief 用户当前是否希望保持与服务器的连接。
+    */
+    bool m_connectionDesired{false};
+
+    /**
+    * @brief 当前客户端连接生命周期状态。
+    */
+    ConnectionState m_connectionState{ConnectionState::Disconnected};
+
     static constexpr int HEARTBEAT_INTERVAL_MS=15*1000;
     static constexpr qint64 SERVER_TIMEOUT_MS=90*1000;
 
-
+    static constexpr int INITIAL_RECONNECT_DELAY_MS = 1000;
+    static constexpr int MAX_RECONNECT_DELAY_MS = 30000;
 };
 
 #endif // CONNECTIONMANAGER_H

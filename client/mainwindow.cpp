@@ -40,7 +40,6 @@ MainWindow::MainWindow(const QString &databasePath,QWidget *parent)
         }
     }
 
-    connect(m_connectionManager,&ConnectionManager::connected,this,&MainWindow::handleConnected);
     connect(m_connectionManager,&ConnectionManager::disconnected,this,&MainWindow::handleDisconnected);
     connect(m_connectionManager,&ConnectionManager::connectionError,this,&MainWindow::handleConnectionError);
     connect(m_connectionManager,
@@ -74,6 +73,12 @@ MainWindow::MainWindow(const QString &databasePath,QWidget *parent)
             this,[this](const QString&filePath){
         statusBar()->showMessage(QString("文件接收完成：%1").arg(filePath),5000);
     });
+
+    connect(m_connectionManager,&ConnectionManager::connectionStateChanged,
+            this,&MainWindow::handleConnectionStateChanged);
+
+    handleConnectionStateChanged(
+        ConnectionManager::ConnectionState::Disconnected);
 }
 
 MainWindow::~MainWindow()
@@ -89,36 +94,17 @@ void MainWindow::on_connectBtn_clicked()
         ui->statusbar->showMessage("Host cannot be empty");
         return;
     }
-    ui->statusbar->showMessage("Connecting...");
-    ui->connectBtn->setDisabled(true);
-    ui->disconnectBtn->setDisabled(true);
     m_connectionManager->connectToServer(host,port);
 }
 
 
 void MainWindow::on_disconnectBtn_clicked()
 {
-    ui->statusbar->showMessage("Disconnecting...");
-    ui->disconnectBtn->setDisabled(true);
     m_connectionManager->disconnectFromServer();
-}
-
-void MainWindow::handleConnected()
-{
-    ui->statusbar->showMessage("Connected");
-    ui->disconnectBtn->setEnabled(true);
-    ui->connectBtn->setDisabled(true);
-    ui->sendBtn->setEnabled(false);
-    ui->receiverComboBox->setEnabled(true);
 }
 
 void MainWindow::handleDisconnected()
 {
-    ui->statusbar->showMessage("Disconnected");
-    ui->connectBtn->setEnabled(true);
-    ui->disconnectBtn->setDisabled(true);
-    ui->sendBtn->setDisabled(true);
-    ui->sendFileBtn->setDisabled(true);
     ui->receiverComboBox->clear();
     ui->receiverComboBox->setDisabled(true);
 }
@@ -126,9 +112,6 @@ void MainWindow::handleDisconnected()
 void MainWindow::handleConnectionError(const QString &message)
 {
     ui->statusbar->showMessage(QString("Connection error:%1").arg(message));
-    ui->connectBtn->setEnabled(true);
-    ui->disconnectBtn->setDisabled(true);
-    ui->sendBtn->setDisabled(true);
 }
 
 
@@ -153,6 +136,55 @@ void MainWindow::on_sendBtn_clicked()
             ui->statusbar->showMessage(
                 QStringLiteral("Failed to save message:%1").arg(databaseError));
         }
+    }
+}
+
+void MainWindow::handleConnectionStateChanged(ConnectionManager::ConnectionState state)
+{
+    switch(state){
+
+    case ConnectionManager::ConnectionState::Disconnected:
+        ui->connectBtn->setEnabled(true);
+        ui->disconnectBtn->setEnabled(false);
+        ui->sendBtn->setEnabled(false);
+        ui->sendFileBtn->setEnabled(false);
+        ui->receiverComboBox->setEnabled(false);
+
+        statusBar()->showMessage("Disconnected");
+        break;
+
+    case ConnectionManager::ConnectionState::Connecting:
+        ui->connectBtn->setEnabled(false);
+        ui->disconnectBtn->setEnabled(true);
+        ui->sendBtn->setEnabled(false);
+        ui->sendFileBtn->setEnabled(false);
+        ui->receiverComboBox->setEnabled(false);
+
+        statusBar()->showMessage("Connecting...");
+        break;
+
+    case ConnectionManager::ConnectionState::Connected:
+        ui->connectBtn->setEnabled(false);
+        ui->disconnectBtn->setEnabled(true);
+        ui->receiverComboBox->setEnabled(true);
+        ui->sendBtn->setEnabled(
+            ui->receiverComboBox->currentData().isValid());
+        ui->sendFileBtn->setEnabled(
+            ui->receiverComboBox->currentData().isValid()
+            &&!m_selectedFilePath.isEmpty());
+
+        statusBar()->showMessage("Connected");
+        break;
+
+    case ConnectionManager::ConnectionState::Reconnecting:
+        ui->connectBtn->setEnabled(false);
+        ui->disconnectBtn->setEnabled(true);
+        ui->sendBtn->setEnabled(false);
+        ui->sendFileBtn->setEnabled(false);
+        ui->receiverComboBox->setEnabled(false);
+
+        statusBar()->showMessage("Reconnecting...");
+        break;
     }
 }
 
