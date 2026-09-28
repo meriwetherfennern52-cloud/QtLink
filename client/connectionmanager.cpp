@@ -8,15 +8,20 @@
 #include"onlineclientlistcodec.h"
 #include"filetransfercontrolcodec.h"
 #include"filechunkcodec.h"
+#include<QTimer>
 
 ConnectionManager::ConnectionManager(QObject *parent)
     : QObject{parent},m_socket(new QTcpSocket(this))
+    ,m_heartbeatTimer(new QTimer(this))
 {
-    connect(m_socket,&QTcpSocket::connected,this,&ConnectionManager::connected);
+    connect(m_socket,&QTcpSocket::connected,this,&ConnectionManager::handleSocketConnected);
+    connect(m_heartbeatTimer,&QTimer::timeout,this,&ConnectionManager::handleHeartbeatTimer);
+
     connect(m_socket,&QTcpSocket::disconnected,this,&ConnectionManager::handleSocketDisconnected);
     connect(m_socket,&QTcpSocket::errorOccurred,this,[this](QAbstractSocket::SocketError error){
         emit connectionError(m_socket->errorString());
     });
+
     connect(m_socket,&QTcpSocket::readyRead,this,&ConnectionManager::handleReadyRead);
     connect(m_socket,&QTcpSocket::bytesWritten,this,[this](qint64 bytes){
         emit socketBytesWritten(bytes);
@@ -169,6 +174,7 @@ void ConnectionManager::handleReadyRead()
                 emit operationError("Invalid text message");
                 break;
             }
+            m_lastServerActivityMs=m_connectionClock.elapsed();
             emit textMessageReceived(senderId,content);
             break;
         }
@@ -181,6 +187,7 @@ void ConnectionManager::handleReadyRead()
                         "Failed to decode online client list."));
                 break;
             }
+            m_lastServerActivityMs=m_connectionClock.elapsed();
             emit onlineClientListReceived(selfId,clientIds);
             break;
         }
@@ -194,6 +201,7 @@ void ConnectionManager::handleReadyRead()
                 emit operationError("Invalid file start message from server.");
                 break;
             }
+            m_lastServerActivityMs=m_connectionClock.elapsed();
             emit fileStartReceived(senderId,transferId,fileName,fileSize);
             break;
         }
@@ -207,6 +215,7 @@ void ConnectionManager::handleReadyRead()
                 break;
             }
 
+            m_lastServerActivityMs=m_connectionClock.elapsed();
             emit fileChunkReceived(transferId,offset,chunkData);
 
             break;
@@ -217,6 +226,7 @@ void ConnectionManager::handleReadyRead()
                 emit operationError("Invalid file end message from server.");
                 break;
             }
+            m_lastServerActivityMs=m_connectionClock.elapsed();
             emit fileEndReceived(transferId);
             break;
         }
@@ -231,6 +241,7 @@ void ConnectionManager::handleReadyRead()
                 return;
             }
 
+            m_lastServerActivityMs=m_connectionClock.elapsed();
             emit fileAbortReceived(transferId,reason);
             break;
         }
@@ -242,12 +253,23 @@ void ConnectionManager::handleReadyRead()
                 return;
             }
 
+            m_lastServerActivityMs=m_connectionClock.elapsed();
             emit fileCompleteReceived(transferId);
+            break;
+        }
+        case Protocol::MessageType::HeartbeatResponse:{
+            if(!packet.body.isEmpty()){
+                emit operationError("Invalid heartbeat response from server.");
+                m_socket->abort();
+                return;
+            }
+            m_lastServerActivityMs=m_connectionClock.elapsed();
             break;
         }
         default:
             emit operationError(QStringLiteral("Unexpected message type from server."));
-            break;
+            m_socket->abort();
+            return;
         }
 
 
@@ -256,8 +278,40 @@ void ConnectionManager::handleReadyRead()
 
 void ConnectionManager::handleSocketDisconnected()
 {
+    m_heartbeatTimer->stop();
     m_receiveBuffer.clear();
     emit disconnected();
+}
+
+void ConnectionManager::handleSocketConnected()
+{
+    m_connectionClock.start();
+    m_lastServerActivityMs=0;
+
+    m_heartbeatTimer->start(HEARTBEAT_INTERVAL_MS);
+
+    emit connected();
+}
+
+void ConnectionManager::handleHeartbeatTimer()
+{
+    if(m_socket->state()!=QAbstractSocket::ConnectedState){
+        m_heartbeatTimer->stop();
+        return;
+    }
+
+    const qint64 now=m_connectionClock.elapsed();
+    if(now-m_lastServerActivityMs>=SERVER_TIMEOUT_MS){
+        emit connectionError("Server heartbeat timed out.");
+        m_heartbeatTimer->stop();
+        m_socket->abort();
+        return;
+    }
+
+    if(!sendHeartbeatRequest()){
+        m_heartbeatTimer->stop();
+        m_socket->abort();
+    }
 }
 
 bool ConnectionManager::writePacket(const Protocol::Packet &packet)
@@ -279,4 +333,13 @@ bool ConnectionManager::writePacket(const Protocol::Packet &packet)
     }
 
     return true;
+}
+
+bool ConnectionManager::sendHeartbeatRequest()
+{
+    Protocol::Packet packet;
+    packet.type=Protocol::MessageType::HeartbeatRequest;
+    packet.body.clear();
+
+    return writePacket(packet);
 }

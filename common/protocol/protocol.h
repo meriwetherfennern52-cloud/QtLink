@@ -48,7 +48,10 @@ enum class MessageType:quint16{
     FileAbort=11,
 
     FileCompleteRequest = 12,
-    FileComplete = 13
+    FileComplete = 13,
+
+    HeartbeatRequest = 14,
+    HeartbeatResponse = 15
 };
 
 /**
@@ -83,6 +86,8 @@ constexpr bool isValidMessageType(quint16 value){
     case MessageType::FileAbort:
     case MessageType::FileCompleteRequest:
     case MessageType::FileComplete:
+    case MessageType::HeartbeatRequest:
+    case MessageType::HeartbeatResponse:
         return true;
     default:
         return false;

@@ -16,12 +16,16 @@ TcpServer::TcpServer(QObject *parent)
     : QObject{parent}
     ,m_server(new QTcpServer(this))
     ,m_transferWatchTimer(new QTimer(this))
+    ,m_clientWatchTimer(new QTimer(this))
 {
     connect(m_server,&QTcpServer::newConnection,this,&TcpServer::handleNewConnection);
     connect(m_transferWatchTimer,&QTimer::timeout,
             this,&TcpServer::checkStalledTransfers);
-    m_transferClock.start();
+    connect(m_clientWatchTimer,&QTimer::timeout,
+            this,&TcpServer::checkClientTimeouts);
+    m_activityClock.start();
     m_transferWatchTimer->start(TRANSFER_WATCH_INTERVAL_MS);
+    m_clientWatchTimer->start(CLIENT_WATCH_INTERVAL_MS);
 }
 
 bool TcpServer::startServer(quint16 port)
@@ -68,6 +72,7 @@ void TcpServer::handleNewConnection()
         const quint32 clientId=m_nextClientId++;
         ClientSession session;
         session.socket=socket;
+        session.lastActivityMs=m_activityClock.elapsed();
         m_sessions.insert(clientId,session);
 
         connect(socket,&QTcpSocket::readyRead,this,[clientId,this](){
@@ -163,6 +168,8 @@ void TcpServer::handleClientReadyRead(quint32 clientId)
             break;
         }
 
+        session.lastActivityMs=m_activityClock.elapsed();
+
         switch (packet.type) {
         case Protocol::MessageType::TextSendRequest:
             handleTextSendRequest(clientId,packet.body);
@@ -181,6 +188,9 @@ void TcpServer::handleClientReadyRead(quint32 clientId)
             break;
         case Protocol::MessageType::FileCompleteRequest:
             handleFileCompleteRequest(clientId,packet.body);
+            break;
+        case Protocol::MessageType::HeartbeatRequest:
+            handleHeartbeatRequest(clientId,packet.body);
             break;
         default:
             emit logMessage(QString("Client %1 sent an unexpected message type.").arg(clientId));
@@ -289,7 +299,7 @@ void TcpServer::handleFileStartRequest(quint32 senderId, const QByteArray &body)
     transfer.fileSize=fileSize;
     transfer.nextOffset=0;
     transfer.phase=TransferPhase::Transferring;
-    transfer.lastActivityMs=m_transferClock.elapsed();
+    transfer.lastActivityMs=m_activityClock.elapsed();
 
     m_activeTransfers.insert(transferId,transfer);
 
@@ -456,7 +466,7 @@ void TcpServer::handleFileChunkRequest(quint32 senderId, const QByteArray &body)
     }
 
     transfer.nextOffset+=chunkSize;
-    transfer.lastActivityMs=m_transferClock.elapsed();
+    transfer.lastActivityMs=m_activityClock.elapsed();
 }
 
 void TcpServer::handleFileEndRequest(quint32 senderId, const QByteArray &body)
@@ -542,7 +552,7 @@ void TcpServer::handleFileEndRequest(quint32 senderId, const QByteArray &body)
     }
 
     transfer.phase=TransferPhase::AwaitingReceiverComplete;
-    transfer.lastActivityMs=m_transferClock.elapsed();
+    transfer.lastActivityMs=m_activityClock.elapsed();
 
     emit logMessage(QString("File transfer %1 data phase completed")
             .arg(transferId));
@@ -676,6 +686,7 @@ void TcpServer::cleanupTransfersForClient(quint32 clientId)
 
             session.readPaused=false;
             session.blockedReceiverId=0;
+            session.lastActivityMs=m_activityClock.elapsed();
             if(sessionIt.key()!=clientId){
                 sendersToResume.insert(sessionIt.key());
             }
@@ -801,6 +812,7 @@ void TcpServer::resumeSenderAfterTransferRemoval(
 
     senderIt.value().readPaused=false;
     senderIt.value().blockedReceiverId=0;
+    senderIt.value().lastActivityMs=m_activityClock.elapsed();
     handleClientReadyRead(senderId);
 }
 
@@ -820,7 +832,7 @@ void TcpServer::scheduleClientDisconnect(quint32 clientId)
 
 void TcpServer::updateReceiverTransferActivity(quint32 receiverId)
 {
-    const qint64 now=m_transferClock.elapsed();
+    const qint64 now=m_activityClock.elapsed();
     for(auto transferIt=m_activeTransfers.begin();
          transferIt!=m_activeTransfers.end();
          ++transferIt){
@@ -834,7 +846,7 @@ void TcpServer::updateReceiverTransferActivity(quint32 receiverId)
 
 void TcpServer::checkStalledTransfers()
 {
-    const qint64 now=m_transferClock.elapsed();
+    const qint64 now=m_activityClock.elapsed();
     QStringList stalledTransferIds;
 
     for(auto transferIt=m_activeTransfers.cbegin();
@@ -853,6 +865,61 @@ void TcpServer::checkStalledTransfers()
                 .arg(transferId));
         abortTransferFromServer(
             transferId,Protocol::FileAbortReason::Timeout);
+    }
+}
+
+void TcpServer::handleHeartbeatRequest(
+    quint32 clientId,const QByteArray &body)
+{
+    if(!body.isEmpty()){
+        emit logMessage(QString("Client %1 sent an invalid heartbeat request")
+                .arg(clientId));
+        scheduleClientDisconnect(clientId);
+        return;
+    }
+
+    auto clientIt=m_sessions.find(clientId);
+    if(clientIt==m_sessions.end()||clientIt.value().socket==nullptr
+        ||clientIt.value().socket->state()!=QAbstractSocket::ConnectedState){
+
+        return;
+    }
+
+    Protocol::Packet packet;
+    packet.type=Protocol::MessageType::HeartbeatResponse;
+    packet.body.clear();
+
+    const QByteArray data=Protocol::PacketCodec::encode(packet);
+    if(clientIt.value().socket->write(data)<0){
+        emit logMessage(QString("Failed to send heartbeat response to Client %1")
+                .arg(clientId));
+        scheduleClientDisconnect(clientId);
+    }
+}
+
+void TcpServer::checkClientTimeouts()
+{
+    const qint64 now=m_activityClock.elapsed();
+    QList<quint32> timedOutClientIds;
+
+    for(auto sessionIt=m_sessions.cbegin();
+         sessionIt!=m_sessions.cend();
+         ++sessionIt){
+
+        const ClientSession &session=sessionIt.value();
+        if(session.readPaused){
+            continue;
+        }
+
+        if(now-session.lastActivityMs>=CLIENT_TIMEOUT_MS){
+            timedOutClientIds.append(sessionIt.key());
+        }
+    }
+
+    for(quint32 clientId:timedOutClientIds){
+        emit logMessage(QString("Client %1 heartbeat timed out")
+                .arg(clientId));
+        scheduleClientDisconnect(clientId);
     }
 }
 
@@ -899,6 +966,7 @@ void TcpServer::resumeSendersForReceiver(quint32 receiverId)
 
         senderIt->readPaused=false;
         senderIt->blockedReceiverId=0;
+        senderIt->lastActivityMs=m_activityClock.elapsed();
         handleClientReadyRead(senderId);
 
         if(receiverSocket->bytesToWrite()

@@ -135,6 +135,18 @@ private:
     void checkStalledTransfers();
 
     /**
+    * @brief 处理客户端发来的空消息体心跳请求。
+    * @param clientId 发送心跳的客户端 ID。
+    * @param body HeartbeatRequest 消息体。
+    */
+    void handleHeartbeatRequest(quint32 clientId,const QByteArray &body);
+
+    /**
+    * @brief 检查并断开长时间没有活动的客户端。
+    */
+    void checkClientTimeouts();
+
+    /**
     * @brief 处理客户端发来的文件传输终止请求。
     *
     * 校验请求客户端是否属于指定活动传输，
@@ -208,12 +220,17 @@ private:
 
     static constexpr qint64 TRANSFER_STALL_TIMEOUT_MS=60000;
 
+    static constexpr int CLIENT_WATCH_INTERVAL_MS=5000;
+
+    static constexpr qint64 CLIENT_TIMEOUT_MS=60000;
+
     struct ClientSession{
         QTcpSocket *socket{nullptr};
         QByteArray receiveBuffer;
 
         bool readPaused{false};
         quint32 blockedReceiverId{0};
+        qint64 lastActivityMs{0};
     };
 
     enum class TransferPhase {
@@ -232,7 +249,8 @@ private:
 
     QTcpServer *m_server;
     QTimer *m_transferWatchTimer;
-    QElapsedTimer m_transferClock;
+    QTimer *m_clientWatchTimer;
+    QElapsedTimer m_activityClock;
     QHash<quint32,ClientSession>m_sessions;
     quint32 m_nextClientId{1};
 

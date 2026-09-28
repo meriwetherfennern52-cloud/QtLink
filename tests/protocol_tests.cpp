@@ -1160,6 +1160,10 @@ void ProtocolTests::fileMessageTypesAreValid_data()
         << static_cast<quint16>(Protocol::MessageType::FileCompleteRequest) << quint16(12);
     QTest::newRow("FileComplete")
         << static_cast<quint16>(Protocol::MessageType::FileComplete) << quint16(13);
+    QTest::newRow("HeartbeatRequest")
+        << static_cast<quint16>(Protocol::MessageType::HeartbeatRequest) << quint16(14);
+    QTest::newRow("HeartbeatResponse")
+        << static_cast<quint16>(Protocol::MessageType::HeartbeatResponse) << quint16(15);
 }
 
 void ProtocolTests::fileMessageTypesAreValid()
@@ -1173,7 +1177,7 @@ void ProtocolTests::fileMessageTypesAreValid()
 
 void ProtocolTests::messageTypeRejectsUndefinedValue()
 {
-    QVERIFY(!Protocol::isValidMessageType(quint16(14)));
+    QVERIFY(!Protocol::isValidMessageType(quint16(16)));
 }
 
 QTEST_APPLESS_MAIN(ProtocolTests)

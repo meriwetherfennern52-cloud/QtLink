@@ -6,6 +6,9 @@
 #include <QByteArray>
 #include<QList>
 #include"protocol.h"
+#include <QElapsedTimer>
+
+class QTimer;
 class QTcpSocket; //前置声明，.cpp里再写↑，减少头文件之间的耦合和不必要的编译依赖
 namespace Protocol{
 struct Packet;
@@ -21,7 +24,6 @@ struct Packet;
  * 当前类不负责：
  * - UI 展示
  * - 本地数据库持久化
- * - 心跳检测
  * - 自动重连
  * - 文件传输
  */
@@ -193,6 +195,7 @@ signals:
     */
     void fileCompleteReceived(const QString &transferId);
 
+
 private slots:
     /**
      * @brief 处理套接字可读事件。
@@ -209,6 +212,16 @@ private slots:
      */
     void handleSocketDisconnected();
 
+    /**
+    * @brief 处理 TCP 连接建立事件并启动心跳检测。
+    */
+    void handleSocketConnected();
+
+    /**
+    * @brief 周期检查服务器活动状态并发送心跳请求。
+    */
+    void handleHeartbeatTimer();
+
 private:
     /**
     * @brief 将一个 QtLink 数据包写入 Socket 发送缓冲区。
@@ -218,8 +231,22 @@ private:
     */
     bool writePacket(const Protocol::Packet &packet);
 
+    /**
+    * @brief 向服务器发送空消息体的心跳请求。
+    * @return 成功写入 Socket 发送缓冲区返回 true，否则返回 false。
+    */
+    bool sendHeartbeatRequest();
+
     QTcpSocket*m_socket;
     QByteArray m_receiveBuffer;
+
+    QTimer*m_heartbeatTimer;
+    QElapsedTimer m_connectionClock;
+    qint64 m_lastServerActivityMs{0};
+
+    static constexpr int HEARTBEAT_INTERVAL_MS=15*1000;
+    static constexpr qint64 SERVER_TIMEOUT_MS=90*1000;
+
 
 };
 
