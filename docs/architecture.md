@@ -1,8 +1,8 @@
-# QtLink 架构说明
+# QtLink Architecture
 
-## 1. 总体结构
+## 1. System Overview
 
-QtLink 采用单进程 Qt Widgets Client、单进程 Qt Widgets Server 的 Client-Server 结构。每个进程运行在 Qt 事件循环中，通过异步 `QTcpSocket` / `QTcpServer` 通信；项目没有额外工作线程或线程池。
+QtLink uses a Client-Server design with a Qt Widgets Client process and a Qt Widgets Server process. Each process runs on the Qt event loop and communicates asynchronously through `QTcpSocket` / `QTcpServer`. The project does not create additional worker threads or thread pools.
 
 ```mermaid
 flowchart LR
@@ -44,38 +44,38 @@ flowchart LR
     TS <--> P
 ```
 
-`common/protocol` 构建为 `qtlink_protocol` 静态库，由 Client、Server 和测试共同使用。Server 只验证并中继消息，不保存聊天数据库或传输文件。
+`common/protocol` is built as the `qtlink_protocol` static library and shared by the Client, Server, and test targets. The Server validates and relays messages; it does not store chat history or transferred files.
 
-## 2. Client 架构
+## 2. Client Architecture
 
 ### MainWindow
 
-`MainWindow` 负责界面交互和展示：连接参数、在线客户端选择、文本发送、文件选择与发送进度。在线列表中的 `QComboBox` 保存真实 `receiverId`，并排除当前客户端自己的 `selfId`。连接断开时，界面会清空旧在线列表和接收者选择。
+`MainWindow` handles UI interaction and presentation: connection settings, online client selection, text messaging, file selection, and send progress. The online-client `QComboBox` stores the actual `receiverId` and excludes the Client's own `selfId`. On disconnect, the UI clears the old online list and receiver selection.
 
-文本历史由 `MainWindow` 调用 `DatabaseManager` 保存和恢复。数据库位于 `QStandardPaths::AppDataLocation/qtlink.db`，重连不会清空本地历史。
+For text history, `MainWindow` uses `DatabaseManager` to save and load messages. The database is stored at `QStandardPaths::AppDataLocation/qtlink.db`; reconnecting does not clear local history.
 
 ### ConnectionManager
 
-`ConnectionManager` 负责：
+`ConnectionManager` is responsible for:
 
-- `QTcpSocket` 的连接、断开和 Packet 收发；
-- 每条连接的 persistent receive buffer；
-- Text、OnlineClientList、File 控制消息与 Heartbeat 的 Codec 调用；
-- `Disconnected / Connecting / Connected / Reconnecting` 状态；
-- Heartbeat timeout；
-- 保存最近一次连接目标并进行 exponential backoff 自动重连。
+- `QTcpSocket` connection, disconnection, and Packet I/O;
+- the persistent receive buffer for the current connection;
+- codec dispatch for Text, OnlineClientList, file control messages, and Heartbeat;
+- the `Disconnected / Connecting / Connected / Reconnecting` state model;
+- heartbeat timeout handling;
+- storing the most recent endpoint and performing exponential-backoff reconnects.
 
-网络层错误通过 `connectionError` 报告，已连接后的协议或操作错误通过 `operationError` 报告。协议错误会终止当前连接意图；普通网络故障和心跳超时保留用户连接意图并进入重连。
+TCP and connection errors are reported through `connectionError`, while protocol and operation failures after connection are reported through `operationError`. Protocol errors terminate the current connection intent. Ordinary network failures and heartbeat timeouts preserve user connection intent and enter the reconnect flow.
 
 ### FileTransferManager
 
-`FileTransferManager` 管理文件 I/O 和文件传输业务状态，不直接解析 TCP Packet。发送状态为 `Idle / Starting / Sending / Finishing`；发送端进入 `Finishing` 后等待接收端经 Server 返回 `FileComplete`，不会用本地 `bytesToWrite()==0` 代替远端完成确认。
+`FileTransferManager` owns file I/O and file-transfer business state; it does not parse TCP Packets directly. The outgoing state is `Idle / Starting / Sending / Finishing`. Once the Sender enters `Finishing`, it waits for `FileComplete` from the Receiver through the Server and does not treat local `bytesToWrite()==0` as remote completion.
 
-接收端为每个 transfer 保存 `senderId`、声明的 `fileSize`、`nextOffset` 和已打开的 `QFile`。接收文件使用 `QIODevice::NewOnly` 在 Downloads/QtLink 中原子创建，避免覆盖已有同名文件。失败和断线清理残缺文件，完成文件在 flush、close 后保留。
+For each incoming transfer, the manager stores `senderId`, declared `fileSize`, `nextOffset`, and an open `QFile`. Received files are atomically created under Downloads/QtLink with `QIODevice::NewOnly`, preventing an existing file from being overwritten. Failure and disconnect cleanup removes partial files, while a successfully flushed and closed file is retained.
 
-## 3. Server 架构
+## 3. Server Architecture
 
-`TcpServer` 负责监听、多客户端 Session、协议方向检查、文本转发、在线列表广播、文件传输验证与中继，以及连接和传输 watchdog。
+`TcpServer` owns the listener, multi-client Sessions, protocol direction checks, text routing, online-list broadcasts, file transfer validation and forwarding, and the connection and transfer watchdogs.
 
 ```mermaid
 classDiagram
@@ -105,35 +105,35 @@ classDiagram
     TcpServer "1" o-- "0..*" ActiveTransfer
 ```
 
-`ClientSession` 由临时 `clientId` 索引，每条连接有独立接收缓冲和背压状态。`ActiveTransfer` 由 UUID 字符串索引，阶段为 `Transferring` 或 `AwaitingReceiverComplete`。Server 对 sender/receiver 身份、Chunk offset、文件大小和阶段进行验证。
+A temporary `clientId` indexes each `ClientSession`, and every connection has an independent receive buffer and backpressure state. A normalized UUID string indexes each `ActiveTransfer`, whose phase is either `Transferring` or `AwaitingReceiverComplete`. The Server validates sender/receiver identity, Chunk offset, declared file size, and transfer phase.
 
 ## 4. common/protocol
 
-协议模块职责分为三层：
+The protocol module separates four responsibilities:
 
-- `Packet`：表示已经拆分出的 MessageType 和 Body；
-- `PacketCodec`：固定 Header 的 BigEndian 编解码；
-- `PacketParser`：从 persistent buffer 中判断完整包、半包或非法包；
-- Message Codec：Text、在线列表、文件控制和 FileChunk Body 的字段校验与序列化。
+- `Packet`: a parsed MessageType and Body;
+- `PacketCodec`: BigEndian encoding and decoding of the fixed Header;
+- `PacketParser`: detection of a complete packet, an incomplete packet, or invalid input in a persistent buffer;
+- message codecs: field validation and serialization for Text, online lists, file control messages, and FileChunk.
 
-`PacketParser` 成功解析后只移除当前 Packet。Client 和每个 Server Session 都持有自己的 persistent buffer，因此不同连接的数据不会相互混合。
+After a successful parse, `PacketParser` removes only the current Packet. The Client and every Server Session own separate persistent buffers, so data from different connections cannot be mixed.
 
-## 5. QObject ownership 与生命周期
+## 5. QObject Ownership and Lifetime
 
-| 对象 | 所有者 / 清理方式 |
+| Object | Owner / cleanup path |
 | --- | --- |
-| Client `ConnectionManager` | `MainWindow` 创建并以其为 parent |
-| Client `FileTransferManager` | `MainWindow` 创建并以其为 parent |
-| Client socket、heartbeat timer、reconnect timer | `ConnectionManager` 的 QObject children |
-| 接收中的 `QFile` | 由 `FileTransferManager` 管理；完成或失败时 close 并释放 |
-| `DatabaseManager` | `MainWindow` 的值成员；析构时关闭并移除专用 SQL connection |
-| Server `TcpServer` | Server `MainWindow` 创建并以其为 parent |
-| Server listener、watchdog timers | `TcpServer` 的 QObject children |
-| Server client socket | 断开回调先清理 Session/Transfer，再 `deleteLater()` |
+| Client `ConnectionManager` | Created by `MainWindow` with `MainWindow` as parent |
+| Client `FileTransferManager` | Created by `MainWindow` with `MainWindow` as parent |
+| Client socket, heartbeat timer, reconnect timer | QObject children of `ConnectionManager` |
+| Incoming `QFile` | Managed by `FileTransferManager`; closed and released on completion or failure |
+| `DatabaseManager` | Value member of `MainWindow`; closes and removes its dedicated SQL connection during destruction |
+| Server `TcpServer` | Created by the Server `MainWindow` with it as parent |
+| Server listener and watchdog timers | QObject children of `TcpServer` |
+| Server client socket | Disconnect callback cleans Session and transfer state before `deleteLater()` |
 
-Server 停止时先取得 socket 快照再逐个断开，避免 `disconnected` 回调删除 `m_sessions` 时使容器迭代器失效。Client 销毁或主动断开时会停止重连意图和 timer，防止程序退出期间重新连接。
+When the Server stops, it first takes a socket snapshot and then disconnects each socket. This prevents `disconnected` callbacks from invalidating an iterator over `m_sessions`. Client destruction or a manual disconnect clears reconnect intent and stops the timer, preventing a new connection during application shutdown.
 
-## 6. 文本消息调用链
+## 6. Text Message Flow
 
 ```mermaid
 sequenceDiagram
@@ -144,15 +144,15 @@ sequenceDiagram
     participant UIB as Client B MainWindow
 
     UIA->>CMA: sendTextMessage(receiverId, content)
-    CMA->>S: TextSendRequest\n{receiverId, content}
-    S->>S: 从当前 Session 得到 senderId\n验证 receiver 在线且不是自己
-    S->>CMB: TextMessage\n{senderId, content}
+    CMA->>S: TextSendRequest<br/>{receiverId, content}
+    S->>S: Derive senderId from current Session<br/>Validate receiver and reject self-send
+    S->>CMB: TextMessage<br/>{senderId, content}
     CMB-->>UIB: textMessageReceived(senderId, content)
 ```
 
-`senderId` 不由发送客户端提供。Server 使用当前 TCP Session 的 `clientId`，避免客户端伪造发送者身份。发送和接收成功的消息由各自 Client 写入本地 SQLite 历史。
+The sending Client never supplies `senderId`. The Server uses the current TCP Session's `clientId`, preventing a Client from impersonating another sender. Each Client records successfully sent and received messages in its local SQLite history.
 
-## 7. 文件传输调用链
+## 7. File Transfer Flow
 
 ```mermaid
 sequenceDiagram
@@ -161,45 +161,45 @@ sequenceDiagram
     participant B as Receiver Client
 
     A->>S: FileStartRequest(receiverId, transferId, metadata)
-    S->>S: 创建 ActiveTransfer(Transferring)
+    S->>S: Create ActiveTransfer(Transferring)
     S->>B: FileStart(senderId, transferId, metadata)
-    loop 每个 Chunk
+    loop Each Chunk
         A->>S: FileChunkRequest(transferId, offset, bytes)
-        S->>S: 校验 sender、phase、offset、fileSize
+        S->>S: Validate sender, phase, offset, and fileSize
         S->>B: FileChunk(transferId, offset, bytes)
     end
     A->>S: FileEndRequest(transferId)
     S->>B: FileEnd(transferId)
     S->>S: phase = AwaitingReceiverComplete
-    B->>B: 校验大小，flush 并 close
+    B->>B: Validate size, flush, and close
     B->>S: FileCompleteRequest(transferId)
     S->>A: FileComplete(transferId)
-    S->>S: 删除 ActiveTransfer
+    S->>S: Remove ActiveTransfer
 ```
 
-任一参与方或 Server 可用 `FileAbortRequest/FileAbort` 终止传输。Server 对请求者身份和阶段进行验证，首个通过验证的 Complete、Abort 或 disconnect 终态获胜。控制消息发送失败时通过断开连接触发现有清理路径，避免状态永久停留。
+Either participant or the Server can terminate a transfer with `FileAbortRequest/FileAbort`. The Server validates requester identity and transfer phase. The first validated terminal event among Complete, Abort, or disconnect wins. If a control message cannot be submitted, the implementation disconnects the affected connection so existing cleanup paths can converge the state.
 
-## 8. Heartbeat 与 Reconnect
+## 8. Heartbeat and Reconnect
 
 ```mermaid
 stateDiagram-v2
     [*] --> Disconnected
-    Disconnected --> Connecting: 用户 Connect
+    Disconnected --> Connecting: User selects Connect
     Connecting --> Connected: TCP connected
-    Connecting --> Reconnecting: 连接失败且仍希望连接
-    Connected --> Reconnecting: 网络错误 / Heartbeat timeout
-    Reconnecting --> Connecting: reconnect timer timeout
-    Connecting --> Connected: 重连成功
-    Connected --> Disconnected: 用户 Disconnect / 协议错误
-    Connecting --> Disconnected: 用户 Disconnect / 协议错误
-    Reconnecting --> Disconnected: 用户 Disconnect
+    Connecting --> Reconnecting: Connection failed and still desired
+    Connected --> Reconnecting: Network error / heartbeat timeout
+    Reconnecting --> Connecting: Reconnect timer expires
+    Connecting --> Connected: Reconnect succeeds
+    Connected --> Disconnected: User Disconnect / protocol error
+    Connecting --> Disconnected: User Disconnect / protocol error
+    Reconnecting --> Disconnected: User Disconnect
 ```
 
-客户端每 15 秒执行 heartbeat 检查，并发送空 Body 的 `HeartbeatRequest`；90 秒没有收到完整合法 Server Packet 时 abort 当前 socket。网络故障保留 `m_connectionDesired`，因此进入自动重连；协议错误按当前设计停止重连。成功连接会重新初始化活动时间、启动 heartbeat timer，并把退避延迟重置为初始值。
+Every 15 seconds, the Client performs its heartbeat check and sends an empty-body `HeartbeatRequest`. If no complete valid Server Packet has arrived for 90 seconds, it aborts the current socket. A network failure preserves `m_connectionDesired` and therefore enters automatic reconnect. A protocol error stops reconnect according to the current design. A successful connection resets the activity baseline, starts the heartbeat timer, and restores the reconnect delay to its initial value.
 
-Server 收到任意完整合法 Client Packet 后刷新 Session 活动时间。Client watchdog 跳过 `readPaused` 的 Session，因为此时是 Server 为背压主动停止读取，不能据此判断客户端失活。文件传输另由 transfer watchdog 检查无进展超时。
+The Server refreshes Session activity after parsing any complete valid Client Packet. Its client watchdog skips a `readPaused` Session because the Server intentionally stopped reading that connection for backpressure and cannot infer client failure from silence. A separate transfer watchdog handles stalled file transfers.
 
-## 9. Backpressure 数据流
+## 9. Backpressure Data Flow
 
 ```mermaid
 flowchart LR
@@ -209,10 +209,10 @@ flowchart LR
     SW --> BS[B QTcpSocket]
     BS --> Out[Receiver QFile]
 
-    SW -. bytesToWrite >= 256 KiB .-> Pause[标记 Sender readPaused]
-    Pause -. 停止 readAll .-> SR
-    SW -. bytesWritten 且 <= 128 KiB .-> Resume[清除 pause 并继续解析]
+    SW -. bytesToWrite >= 256 KiB .-> Pause[Set Sender readPaused]
+    Pause -. Stop readAll .-> SR
+    SW -. bytesWritten and <= 128 KiB .-> Resume[Clear pause and resume parsing]
     Resume -.-> SR
 ```
 
-Client 发送端同样依据本地 socket 待写字节数限制 pump，不会无限读取 `QFile`。Server 下游达到高水位后，在读取和解析下一个 Packet 前暂停对应 Sender；低于低水位后才恢复，形成 hysteresis。暂停期间 socket read buffer 也有上限，使 TCP 流控继续向发送 Client 传播。Transfer Abort、Complete、timeout 或 receiver disconnect 会解除已经失效的 pause 依赖。
+The Client send path also limits its pump according to the local socket's pending bytes and does not read the entire `QFile` eagerly. When the Server's downstream buffer reaches the high-water mark, it pauses the corresponding Sender before reading or parsing the next Packet. It resumes only at or below the low-water mark, forming hysteresis. The socket receive-buffer limit lets TCP flow control propagate back to the sending Client. Transfer Abort, Complete, timeout, or Receiver disconnect removes obsolete pause dependencies.

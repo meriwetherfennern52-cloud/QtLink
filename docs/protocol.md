@@ -1,40 +1,40 @@
-# QtLink 应用层协议
+# QtLink Application Protocol
 
-## 1. 协议概览
+## 1. Protocol Overview
 
-QtLink 运行在 TCP 字节流之上。每条应用层消息由固定长度 Header 和变长 Body 组成：
+QtLink runs over a TCP byte stream. Every application message consists of a fixed-size Header followed by a variable-size Body:
 
 ```text
-+------------+---------+-------------+------------+------------------+
-| Magic 4 B  | Ver 1 B | Type 2 B    | Length 4 B | Body Length bytes|
-+------------+---------+-------------+------------+------------------+
++------------+---------+-------------+------------+-------------------+
+| Magic 4 B  | Ver 1 B | Type 2 B    | Length 4 B | Body Length bytes |
++------------+---------+-------------+------------+-------------------+
 ```
 
-- Header 总长度：`11` 字节
-- Magic：ASCII `QLNK`
-- Version：`1`
-- MessageType：无符号 16 位整数
-- BodyLength：无符号 32 位整数，只表示 Body 字节数
-- 多字节整数：BigEndian
-- 最大 Body：`8 * 1024 * 1024` 字节（8 MiB）
+- Header size: `11` bytes
+- Magic: ASCII `QLNK`
+- Version: `1`
+- MessageType: unsigned 16-bit integer
+- BodyLength: unsigned 32-bit integer containing only the Body size
+- Multi-byte integer byte order: BigEndian
+- Maximum Body size: `8 * 1024 * 1024` bytes (8 MiB)
 
-Header 当前不包含压缩、校验和或加密字段。
+The current Header does not include compression, checksum, or encryption fields.
 
 ## 2. Packet Header
 
-| Offset | 长度 | 字段 | 当前值 / 类型 | 说明 |
+| Offset | Size | Field | Current value / type | Description |
 | ---: | ---: | --- | --- | --- |
-| 0 | 4 | Magic | `QLNK` | 协议标识 |
-| 4 | 1 | Version | `1` | 协议版本 |
-| 5 | 2 | MessageType | `quint16` | 消息类型，BigEndian |
-| 7 | 4 | BodyLength | `quint32` | Body 长度，BigEndian |
-| 11 | BodyLength | Body | bytes | JSON、二进制 Chunk 或空 Body |
+| 0 | 4 | Magic | `QLNK` | Protocol identifier |
+| 4 | 1 | Version | `1` | Protocol version |
+| 5 | 2 | MessageType | `quint16` | Message type, BigEndian |
+| 7 | 4 | BodyLength | `quint32` | Body length, BigEndian |
+| 11 | BodyLength | Body | bytes | JSON, binary Chunk, or empty Body |
 
-`PacketCodec` 编码时写入上述字段。解码和解析会拒绝错误 Magic、错误 Version、未定义 MessageType，以及超过 `MAX_BODY_SIZE` 的 BodyLength。
+`PacketCodec` writes these fields during encoding. Decoding and parsing reject an invalid Magic, an unsupported Version, an undefined MessageType, or a BodyLength greater than `MAX_BODY_SIZE`.
 
-## 3. MessageType 与方向
+## 3. Message Types and Directions
 
-| 数值 | MessageType | 方向 | Body |
+| Value | MessageType | Direction | Body |
 | ---: | --- | --- | --- |
 | 1 | `TextSendRequest` | Client → Server | JSON |
 | 2 | `TextMessage` | Server → Client | JSON |
@@ -49,18 +49,18 @@ Header 当前不包含压缩、校验和或加密字段。
 | 11 | `FileAbort` | Server → Client | JSON |
 | 12 | `FileCompleteRequest` | Client → Server | JSON |
 | 13 | `FileComplete` | Server → Client | JSON |
-| 14 | `HeartbeatRequest` | Client → Server | 空 |
-| 15 | `HeartbeatResponse` | Server → Client | 空 |
+| 14 | `HeartbeatRequest` | Client → Server | Empty |
+| 15 | `HeartbeatResponse` | Server → Client | Empty |
 
-`isValidMessageType()` 只判断数值是否属于当前协议。Client 和 Server 的分发 switch 还会分别检查消息方向：Server 不接受 Server → Client 类型，Client 不接受 Client → Server 类型。
+`isValidMessageType()` only checks whether the numeric value belongs to the current protocol. The Client and Server dispatch switches additionally enforce direction: the Server does not accept Server-to-Client message types, and the Client does not accept Client-to-Server message types.
 
-## 4. JSON Body 约定
+## 4. JSON Body Rules
 
-JSON 消息使用 UTF-8 Compact JSON。解码要求根节点为 object，并校验必需字段、字段类型和数值范围。下面为了阅读采用格式化展示；实际发送内容不带多余空白。
+JSON messages use UTF-8 Compact JSON. Decoding requires the root value to be an object and validates required fields, field types, and numeric ranges. The examples below are formatted for readability; transmitted JSON contains no extra whitespace.
 
 ### 4.1 TextSendRequest
 
-Client 请求向指定在线客户端发送文本：
+A Client requests delivery of text to a selected online Client:
 
 ```json
 {
@@ -69,14 +69,14 @@ Client 请求向指定在线客户端发送文本：
 }
 ```
 
-- `receiverId`：大于 0 且不超过 `quint32` 最大值的整数
-- `content`：字符串
+- `receiverId`: an integer greater than 0 and no greater than the maximum `quint32` value
+- `content`: a string
 
-Client 不提供 `senderId`。Server 从当前 TCP Session 获得发送者身份。
+The Client does not provide `senderId`. The Server derives sender identity from the current TCP Session.
 
 ### 4.2 TextMessage
 
-Server 向接收 Client 下发文本：
+The Server delivers text to the receiving Client:
 
 ```json
 {
@@ -85,12 +85,12 @@ Server 向接收 Client 下发文本：
 }
 ```
 
-- `senderId`：大于 0 且不超过 `quint32` 最大值的整数
-- `content`：字符串
+- `senderId`: an integer greater than 0 and no greater than the maximum `quint32` value
+- `content`: a string
 
 ### 4.3 OnlineClientList
 
-Server 为每个 Client 分别生成在线列表：
+The Server generates an online list separately for each Client:
 
 ```json
 {
@@ -99,13 +99,13 @@ Server 为每个 Client 分别生成在线列表：
 }
 ```
 
-- `selfId`：该接收连接自己的临时 `clientId`
-- `clientIds`：当前在线 `clientId` 数组，元素均为合法非零 `quint32`
-- `selfId` 必须出现在 `clientIds` 中
+- `selfId`: the temporary `clientId` of the receiving connection
+- `clientIds`: an array of current online IDs, each a valid non-zero `quint32`
+- `selfId` must be present in `clientIds`
 
-## 5. 文件传输控制消息
+## 5. File Transfer Control Messages
 
-`transferId` 必须是合法、非 Null UUID。Codec 会统一规范化为 `QUuid::WithoutBraces` 的小写字符串形式，例如：
+A `transferId` must be a valid, non-Null UUID. The codecs normalize it to the lowercase `QUuid::WithoutBraces` form, for example:
 
 ```text
 550e8400-e29b-41d4-a716-446655440000
@@ -113,7 +113,7 @@ Server 为每个 Client 分别生成在线列表：
 
 ### 5.1 FileStartRequest
 
-Client → Server：
+Client → Server:
 
 ```json
 {
@@ -124,14 +124,14 @@ Client → Server：
 }
 ```
 
-- `receiverId`：合法非零 `quint32`
-- `transferId`：合法 UUID
-- `fileName`：非空字符串
-- `fileSize`：大于或等于 0 的整数，允许零字节文件
+- `receiverId`: a valid non-zero `quint32`
+- `transferId`: a valid UUID
+- `fileName`: a non-empty string
+- `fileSize`: an integer greater than or equal to 0; zero-byte files are valid
 
 ### 5.2 FileStart
 
-Server → Client：
+Server → Client:
 
 ```json
 {
@@ -142,11 +142,11 @@ Server → Client：
 }
 ```
 
-字段规则与 `FileStartRequest` 相同，但目标 `receiverId` 被 Server 根据 Session 验证后移除，改为由 Server 写入可信的 `senderId`。
+The field rules match `FileStartRequest`, except that the Server removes the validated destination `receiverId` and inserts the trusted `senderId` derived from the sending Session.
 
 ### 5.3 FileEndRequest / FileEnd
 
-两种消息方向不同，Body 相同：
+The messages have different directions but share the same Body:
 
 ```json
 {
@@ -154,11 +154,11 @@ Server → Client：
 }
 ```
 
-`FileEndRequest` 表示 Sender 已提交声明范围内的全部 Chunk。Server 验证 `nextOffset == fileSize` 后向 Receiver 发送 `FileEnd`，并进入等待 Receiver 最终确认的阶段。
+`FileEndRequest` means the Sender has submitted all Chunks within the declared file range. After verifying `nextOffset == fileSize`, the Server forwards `FileEnd` to the Receiver and enters the phase that waits for the Receiver's final acknowledgement.
 
 ### 5.4 FileCompleteRequest / FileComplete
 
-两种消息复用 transferId-only Body：
+Both messages reuse the transferId-only Body:
 
 ```json
 {
@@ -166,11 +166,11 @@ Server → Client：
 }
 ```
 
-Receiver 在文件大小验证、flush 和 close 成功后发送 `FileCompleteRequest`。Server 验证请求者确为该 transfer 的 Receiver 且阶段正确，再向 Sender 发送 `FileComplete` 并删除 ActiveTransfer。
+The Receiver sends `FileCompleteRequest` after validating the file size and successfully flushing and closing the file. The Server verifies that the requester is the transfer's Receiver and that the phase is valid, sends `FileComplete` to the Sender, and then removes the ActiveTransfer.
 
 ### 5.5 FileAbortRequest / FileAbort
 
-两种消息复用相同 Body：
+Both messages reuse the same Body:
 
 ```json
 {
@@ -179,21 +179,21 @@ Receiver 在文件大小验证、flush 和 close 成功后发送 `FileCompleteRe
 }
 ```
 
-`reason` 对应 `FileAbortReason`：
+`reason` maps to `FileAbortReason`:
 
-| 数值 | 名称 | 含义 |
+| Value | Name | Meaning |
 | ---: | --- | --- |
-| 1 | `PeerDisconnected` | 对端连接断开 |
-| 2 | `IoError` | 本地文件 I/O 失败 |
-| 3 | `Cancelled` | 传输取消原因；当前 UI 未提供主动取消入口 |
-| 4 | `ProtocolError` | 文件传输状态或数据违反协议 |
-| 5 | `Timeout` | 文件传输长期无进展 |
+| 1 | `PeerDisconnected` | A peer connection was lost |
+| 2 | `IoError` | Local file I/O failed |
+| 3 | `Cancelled` | Cancellation reason; the current UI has no manual cancel action |
+| 4 | `ProtocolError` | Transfer state or data violated the protocol |
+| 5 | `Timeout` | The transfer made no progress for the timeout interval |
 
-Server 只允许 transfer 的 Sender 或 Receiver 提交 `FileAbortRequest`。Abort、Complete 和 disconnect 按 Server 首个验证成功并处理的终态事件收敛。
+The Server accepts a `FileAbortRequest` only from that transfer's Sender or Receiver. Abort, Complete, and disconnect converge according to the first terminal event that the Server validates and processes.
 
-## 6. FileChunk 二进制 Body
+## 6. FileChunk Binary Body
 
-`FileChunkRequest` 和 `FileChunk` 方向不同，Body 布局相同：
+`FileChunkRequest` and `FileChunk` have different directions but use the same Body layout:
 
 ```text
 +----------------------+------------------+----------------------+
@@ -201,42 +201,42 @@ Server 只允许 transfer 的 Sender 或 Receiver 提交 `FileAbortRequest`。Ab
 +----------------------+------------------+----------------------+
 ```
 
-| Offset | 长度 | 字段 | 说明 |
+| Offset | Size | Field | Description |
 | ---: | ---: | --- | --- |
-| 0 | 16 | transferId | `QUuid::toRfc4122()` 的 16 字节表示，Null UUID 非法 |
-| 16 | 8 | offset | 有符号 `qint64`，BigEndian，必须大于或等于 0 |
-| 24 | 1..65536 | chunkData | 原始二进制数据，可包含 `0x00` 和任意非文本字节 |
+| 0 | 16 | transferId | The 16-byte result of `QUuid::toRfc4122()`; a Null UUID is invalid |
+| 16 | 8 | offset | Signed `qint64`, BigEndian, must be greater than or equal to 0 |
+| 24 | 1..65536 | chunkData | Raw binary bytes; may contain `0x00` and arbitrary non-text data |
 
-Body 至少为 25 字节；只有 24 字节元数据而没有 Chunk 数据时解码失败。单个 Chunk 最大为 64 KiB。Server 还会验证 offset 必须严格等于 ActiveTransfer 的 `nextOffset`，并且 Chunk 不能超过声明的 `fileSize`。
+The Body must contain at least 25 bytes. A 24-byte metadata-only Body with no Chunk data is invalid. One Chunk carries at most 64 KiB. The Server also verifies that offset exactly matches the ActiveTransfer's `nextOffset` and that the Chunk does not extend beyond the declared `fileSize`.
 
-零字节文件不发送 FileChunk，直接走 Start → End → Complete 流程。
+A zero-byte file sends no FileChunk and follows the Start → End → Complete path directly.
 
 ## 7. Heartbeat
 
-`HeartbeatRequest` 和 `HeartbeatResponse` 的 Body 必须严格为空：
+`HeartbeatRequest` and `HeartbeatResponse` require a strictly empty Body:
 
 ```text
 BodyLength = 0
 ```
 
-Client 定时发送 `HeartbeatRequest`，Server 回复 `HeartbeatResponse`。任意完整合法 Packet 都可以刷新相应连接的活动时间；Heartbeat 用于在没有业务数据时检测失活连接，不承载业务字段。
+The Client periodically sends `HeartbeatRequest`, and the Server replies with `HeartbeatResponse`. Any complete valid Packet can refresh the corresponding connection activity timestamp. Heartbeat detects stale connections when no business data is flowing and carries no business fields.
 
-## 8. TCP 粘包与半包处理
+## 8. TCP Packet Coalescing and Fragmentation
 
-TCP 只提供有序字节流，不保留应用消息边界。QtLink 在 Client 和每个 Server `ClientSession` 中分别维护 persistent receive buffer：
+TCP provides an ordered byte stream but does not preserve application message boundaries. QtLink keeps a persistent receive buffer in the Client and in every Server `ClientSession`:
 
-1. `readyRead` 将 `readAll()` 结果追加到当前连接的 buffer；
-2. buffer 少于 11 字节时返回 `NeedMoreData`；
-3. Header 完整后先校验 Magic、Version、MessageType 和 BodyLength；
-4. 完整 Packet 尚未到达时保留全部数据并返回 `NeedMoreData`；
-5. 完整 Packet 到达后输出当前 Packet，只从 buffer 前端移除该 Packet；
-6. 调用方继续循环解析 buffer 中的后续 Packet。
+1. `readyRead` appends the result of `readAll()` to the current connection's buffer.
+2. If the buffer contains fewer than 11 bytes, parsing returns `NeedMoreData`.
+3. Once the Header is complete, the parser validates Magic, Version, MessageType, and BodyLength.
+4. If the complete Packet has not arrived, all bytes remain in the buffer and parsing returns `NeedMoreData`.
+5. When a complete Packet is available, the parser outputs that Packet and removes only its bytes from the front of the buffer.
+6. The caller continues parsing any following Packets in the same buffer.
 
-因此同一逻辑同时支持：
+The same logic therefore supports:
 
-- 单个完整 Packet；
-- Header 或 Body 分多次到达；
-- 多个 Packet 一次到达；
-- 一个完整 Packet 后紧跟下一 Packet 的部分数据。
+- one complete Packet;
+- a Header or Body split across multiple reads;
+- multiple Packets delivered in one read;
+- one complete Packet followed by a partial next Packet.
 
-解析出非法 Header 时，当前实现把它视为 connection-level protocol error 并终止该连接，而不是尝试在任意字节位置重新同步 Magic。
+An invalid Header is treated as a connection-level protocol error. The current implementation terminates that connection instead of scanning arbitrary byte positions to resynchronize on Magic.

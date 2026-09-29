@@ -1,27 +1,27 @@
 # QtLink
 
-## 项目简介
+## Overview
 
-QtLink 是一个基于 **C++17 / Qt** 的 Client-Server 桌面通信项目。项目使用 Qt Widgets 构建客户端与服务端界面，通过 `QTcpSocket` / `QTcpServer` 完成网络通信，并实现了一套包含消息边界、文件传输控制、心跳和异常收敛机制的自定义 TCP 应用层协议。
+QtLink is a Client-Server desktop communication project built with **C++17 and Qt**. It uses Qt Widgets for the client and server interfaces, `QTcpSocket` / `QTcpServer` for networking, and a custom TCP application protocol with message framing, file transfer control, heartbeat, and failure convergence.
 
-项目面向 C++/Qt 工程实践展示，重点覆盖 TCP 流式解析、Qt 对象生命周期、异步文件传输、背压、连接恢复和自动化测试。`clientId` 是服务端为当前 TCP 会话分配的临时标识，不是永久用户账号。
+The project focuses on practical C++/Qt engineering topics, including TCP stream parsing, QObject lifetime management, asynchronous file transfer, backpressure, connection recovery, and automated testing. A `clientId` is a temporary identifier assigned by the server to one TCP session; it is not a permanent user account.
 
-## 核心功能
+## Features
 
-- 多客户端 TCP 连接与会话管理
-- 临时 `clientId` 分配和在线客户端列表同步
-- 基于 `receiverId` 的定向文本消息
-- 自定义 QtLink 二进制应用层协议
-- persistent receive buffer 处理 TCP 粘包、半包和连续多包
-- SQLite 本地消息历史持久化
-- 文件分块传输、发送进度和安全的接收文件创建
-- `FileAbort` 异常终止与 `FileComplete` 接收完成确认
-- Client 与 Server 两段有界 Backpressure
-- Heartbeat、连接超时和文件传输 watchdog
-- Exponential Backoff 自动重连
-- Qt Test 协议、状态机与本地集成测试
+- Multi-client TCP connection and session management
+- Temporary `clientId` assignment and online client list synchronization
+- Directed text messages using `receiverId`
+- Custom QtLink binary application protocol
+- Persistent receive buffers for TCP packet coalescing and fragmentation
+- Local message history stored with SQLite
+- Chunked file transfer, send progress, and safe received-file creation
+- `FileAbort` failure handling and `FileComplete` receiver acknowledgement
+- Bounded backpressure on both the Client and Server forwarding paths
+- Heartbeat, connection timeout, and file transfer watchdog
+- Automatic reconnect with exponential backoff
+- Qt Test coverage for protocol, state-machine, and local integration behavior
 
-## 技术栈
+## Technology
 
 - C++17
 - Qt Widgets
@@ -31,7 +31,7 @@ QtLink 是一个基于 **C++17 / Qt** 的 Client-Server 桌面通信项目。项
 - CMake
 - Git
 
-## 系统架构
+## Architecture
 
 ```mermaid
 flowchart LR
@@ -66,106 +66,106 @@ flowchart LR
     TS <--> Common
 ```
 
-客户端由 `MainWindow` 组织界面与本地消息历史，`ConnectionManager` 管理 TCP、协议收发、Heartbeat 和自动重连，`FileTransferManager` 管理文件 I/O 与传输状态。服务端的 `TcpServer` 使用 `ClientSession` 保存每条连接的独立接收缓冲和活动状态，并用 `ActiveTransfer` 验证和中继文件传输。客户端和服务端共同链接 `qtlink_protocol` 静态库。
+On the Client, `MainWindow` coordinates the UI and local message history, `ConnectionManager` manages TCP, protocol traffic, heartbeat, and reconnection, and `FileTransferManager` owns file I/O and transfer state. On the Server, `TcpServer` stores per-connection receive and activity state in `ClientSession`, and validates and relays file transfers through `ActiveTransfer`. Both applications link the `qtlink_protocol` static library.
 
-## 核心设计
+## Core Design
 
-### 1. QtLink 自定义应用层协议
+### 1. QtLink application protocol
 
-每个 Packet 使用固定 11 字节 Header，包含 Magic、Version、MessageType 和 BodyLength。整数采用 BigEndian 编码，Body 上限为 8 MiB。文本和控制消息使用 Compact JSON，文件 Chunk 使用 UUID、offset 和原始二进制数据组成的紧凑布局。
+Every Packet has a fixed 11-byte Header containing Magic, Version, MessageType, and BodyLength. Multi-byte integers use BigEndian encoding, and a Body is limited to 8 MiB. Text and control messages use Compact JSON. File chunks use a compact binary layout containing a UUID, offset, and raw bytes.
 
-### 2. TCP 粘包与半包处理
+### 2. TCP stream parsing
 
-每条连接维护独立的 persistent receive buffer。`PacketParser` 只在 Header 和完整 Body 都到达后产出 Packet；成功后仅移除当前 Packet，因此能连续处理单包、半包、多个粘包以及“完整包 + 下一包半包”。
+Each connection owns a persistent receive buffer. `PacketParser` emits a Packet only after both the Header and complete Body have arrived. A successful parse removes only that Packet, allowing the same loop to handle one packet, fragmented packets, multiple coalesced packets, and a complete packet followed by a partial one.
 
 ### 3. ClientSession
 
-服务端以临时 `clientId` 索引 `ClientSession`。Session 保存 `QTcpSocket`、接收缓冲、背压暂停状态和活动时间，避免多组平行容器之间的同步问题。连接断开时，相关 Session 和文件传输状态统一清理。
+The Server indexes `ClientSession` objects by temporary `clientId`. A Session stores its `QTcpSocket`, receive buffer, backpressure state, and activity timestamp, avoiding synchronization problems between parallel containers. Disconnect handling removes both the Session and related file transfer state.
 
-### 4. 定向文本消息
+### 4. Directed text messages
 
-客户端发送 `TextSendRequest`，只提供 `receiverId` 和内容。服务端从当前连接得到可信的 `senderId`，验证目标在线后向指定客户端发送 `TextMessage`，不会把客户端提供的数据当作发送者身份。
+The Client sends a `TextSendRequest` containing only `receiverId` and content. The Server derives the trusted `senderId` from the current connection, validates that the receiver is online, and sends a `TextMessage` only to that client.
 
-### 5. 文件传输生命周期
+### 5. File transfer lifecycle
 
-正常流程为 `FileStartRequest → FileStart → FileChunkRequest/FileChunk → FileEndRequest/FileEnd → FileCompleteRequest/FileComplete`。服务端只验证并中继，不保存文件；接收端完成写入、flush 和 close 后发送最终确认。不可恢复错误通过 `FileAbortRequest/FileAbort` 收敛，迟到的旧 Packet 会被安全忽略。
+The normal flow is `FileStartRequest → FileStart → FileChunkRequest/FileChunk → FileEndRequest/FileEnd → FileCompleteRequest/FileComplete`. The Server validates and relays data without storing the file. The Receiver sends the final acknowledgement only after writing, flushing, and closing the file. Unrecoverable errors converge through `FileAbortRequest/FileAbort`, and late packets for a finished transfer are ignored safely.
 
-### 6. 高低水位 Backpressure
+### 6. High/low-water backpressure
 
-客户端按 64 KiB 读取文件，并根据 socket 待写字节数限制发送窗口。服务端对下游接收端使用 256 KiB 高水位和 128 KiB 低水位形成 hysteresis：下游积压时暂停读取对应发送端，排空后再恢复，避免无界堆积文件 Chunk。
+The Client reads files in 64 KiB chunks and limits its send window using the socket's pending byte count. The Server uses a 256 KiB high-water mark and 128 KiB low-water mark for hysteresis: it pauses the related Sender when the Receiver backlog reaches the high-water mark and resumes only after the backlog drains to the low-water mark.
 
-### 7. Heartbeat 与 watchdog
+### 7. Heartbeat and watchdogs
 
-客户端定时发送空 Body 的 `HeartbeatRequest`，服务端返回 `HeartbeatResponse`。双方记录合法 Packet 活动时间并检测失活连接；文件传输另有 stall watchdog，保证长期无进展的 ActiveTransfer 最终终止。服务端主动暂停读取的连接不会被误判为心跳超时。
+The Client periodically sends an empty-body `HeartbeatRequest`, and the Server returns `HeartbeatResponse`. Both sides track valid Packet activity to detect stale connections. A separate transfer stall watchdog ensures an `ActiveTransfer` with no progress is eventually terminated. A Server Session intentionally paused by backpressure is excluded from client timeout checks.
 
-### 8. 自动重连
+### 8. Automatic reconnect
 
-`ConnectionManager` 区分用户连接意图与网络故障。异常断开后使用 single-shot timer 按 1、2、4、8、16 秒增长并封顶约 30 秒；成功连接后重置退避。用户主动断开会停止定时器，新的 TCP 会话不会恢复旧文件传输。
+`ConnectionManager` distinguishes user connection intent from network failure. After an unexpected disconnect, a single-shot timer retries after 1, 2, 4, 8, and 16 seconds, capped at approximately 30 seconds. A successful connection resets the delay. A manual disconnect stops the timer, and a new TCP session never resumes an old file transfer.
 
-## 项目目录
+## Repository Layout
 
 ```text
 QtLink/
-├── client/                 # Qt Widgets 客户端与 SQLite、文件传输业务
-├── server/                 # Qt Widgets 服务端与多客户端会话管理
-├── common/protocol/        # Packet、Parser 和各类消息 Codec
-├── tests/                  # Qt Test 协议、状态机和集成测试
-├── docs/                   # 架构与协议说明
-├── screenshots/            # 项目运行截图
-└── CMakeLists.txt          # 顶层构建入口
+├── client/                 # Qt Widgets client, SQLite, and file transfer logic
+├── server/                 # Qt Widgets server and multi-client session management
+├── common/protocol/        # Packet framing, parser, and message codecs
+├── tests/                  # Qt Test protocol, state-machine, and integration tests
+├── docs/                   # Architecture and protocol documentation
+├── screenshots/            # Application screenshots
+└── CMakeLists.txt          # Top-level build entry point
 ```
 
-## 环境要求
+## Requirements
 
-- 支持 C++17 的编译器
-- CMake 3.16 或更高版本
-- Qt 5 或 Qt 6
-- Qt modules：Core、Widgets、Network、Sql、Test
-- 可用的 Qt SQLite driver
+- A compiler with C++17 support
+- CMake 3.16 or later
+- Qt 5 or Qt 6
+- Qt modules: Core, Widgets, Network, Sql, and Test
+- An available Qt SQLite driver
 
-CMake 文件没有限定具体 Qt 小版本；实际环境只需满足所用 Qt API 和上述 modules。
+The CMake configuration does not require a specific Qt minor version; the selected Qt installation must provide the APIs and modules used by the project.
 
-## 编译与运行
+## Build and Run
 
-在仓库根目录执行：
+From the repository root:
 
 ```bash
 cmake -S . -B build
 cmake --build build --config Release
 ```
 
-也可以只构建应用目标：
+To build only the applications:
 
 ```bash
 cmake --build build --target server client --config Release
 ```
 
-生成文件的位置取决于所用 CMake generator。先启动 `server`，在服务端界面选择监听端口并启动监听；再启动一个或多个 `client`，填写相同的主机地址和端口进行连接。
+The executable location depends on the selected CMake generator. Start `server` first and choose a listening port in its UI. Then start one or more `client` instances and connect them to the same host and port.
 
-客户端消息数据库保存在 `QStandardPaths::AppDataLocation` 对应目录下，文件名为 `qtlink.db`。接收到的文件原子创建在系统 Downloads 目录下的 `QtLink` 子目录中。
+The Client stores its message database as `qtlink.db` under `QStandardPaths::AppDataLocation`. Received files are created atomically under the `QtLink` subdirectory of the system Downloads location.
 
-## 自动化测试
+## Automated Tests
 
-当前 CMake 注册了以下 Qt Test 目标：
+The current CMake configuration registers these Qt Test targets:
 
-- `protocol_tests`：Packet 编解码、粘包/半包、JSON Codec、文件控制消息与 FileChunk
-- `stage12_tests`：文件传输状态、终态竞争、异常清理、超时与背压回归
-- `stage14_tests`：连接状态、首次失败、指数退避、重连意图与文件状态清理
-- `stage15_integration_tests`：本地双客户端文本通信、文件控制链路、服务端重启、watchdog、SQLite 和对象销毁
+- `protocol_tests`: Packet encoding, stream parsing, JSON codecs, file control messages, and FileChunk
+- `stage12_tests`: file transfer state, terminal-event races, failure cleanup, timeout, and backpressure regressions
+- `stage14_tests`: connection states, initial failure, exponential backoff, reconnect intent, and file state cleanup
+- `stage15_integration_tests`: local two-client text messaging, file control flow, server restart, watchdogs, SQLite, and object destruction
 
-构建并运行全部测试：
+Build and run all tests:
 
 ```bash
 cmake --build build --target protocol_tests stage12_tests stage14_tests stage15_integration_tests --config Release
 ctest --test-dir build --output-on-failure -C Release
 ```
 
-## 运行截图
+## Screenshots
 
-<img src="C:\Users\wangj\AppData\Roaming\Typora\typora-user-images\image-20260929104041076.png" alt="image-20260929104041076" style="zoom:80%;" />
+<img src="C:\Users\wangj\AppData\Roaming\Typora\typora-user-images\image-20260929110346262.png" alt="image-20260929110346262" style="zoom:80%;" />
 
-<img src="C:\Users\wangj\AppData\Roaming\Typora\typora-user-images\image-20260929104235220.png" alt="image-20260929104235220" style="zoom:80%;" />
+<img src="C:\Users\wangj\AppData\Roaming\Typora\typora-user-images\image-20260929110414269.png" alt="image-20260929110414269" style="zoom:80%;" />
 
-## 项目状态
+## Project Status
 
-QtLink 的核心通信、文件传输、异常收敛、心跳和自动重连功能已经完成，QtLink 当前核心功能已完成，进入稳定维护状态。
+QtLink's core communication, file transfer, failure convergence, heartbeat, and automatic reconnect features are complete. The project is currently in its stable-version cleanup and review phase.
