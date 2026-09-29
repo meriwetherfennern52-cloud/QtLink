@@ -349,9 +349,7 @@ void TcpServer::handleTextSendRequest(quint32 senderId, const QByteArray &body)
     Protocol::Packet outgoingPacket;
     outgoingPacket.type=Protocol::MessageType::TextMessage;
     outgoingPacket.body=
-        Protocol::TextMessageCodec::encodeTextMessage(
-            senderId,
-            content);
+        Protocol::TextMessageCodec::encodeTextMessage(senderId,content);
 
     if(outgoingPacket.body.size()>
         static_cast<qsizetype>(Protocol::MAX_BODY_SIZE)){

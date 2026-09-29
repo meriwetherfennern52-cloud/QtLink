@@ -9,12 +9,15 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
 
     ui->statusbar->showMessage("Stopped");
+
     connect(m_tcpServer,&TcpServer::clientCountChanged,this,[this](int count){
         ui->onlineCountLabel->setText(QString::number(count));
     });
+
     connect(m_tcpServer,&TcpServer::logMessage,this,[this](const QString &message){
         ui->serverLogTextEdit->appendPlainText(message);
     });
+
     connect(m_tcpServer,&TcpServer::serverError,this,[this](const QString &message){
         ui->statusbar->showMessage(QString("Server error: %1").arg(message));
     });

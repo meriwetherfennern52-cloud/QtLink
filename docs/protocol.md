@@ -1,484 +1,66 @@
-# QtLink Protocol Specification
+# QtLink 应用层协议
 
-## 1. Overview
+## 1. 协议概览
 
-QtLink 使用 TCP 作为传输层协议，并在 TCP 字节流之上定义自己的应用层协议。
-
-由于 TCP 是面向字节流的协议，本身不保留应用层消息边界，因此 QtLink 需要自行解决：
-
-- 应用层消息边界识别
-- TCP 粘包
-- TCP 半包
-- 消息类型区分
-- 消息体长度校验
-- 协议版本校验
-- 文本消息路由
-- 在线客户端列表同步
-- 文件传输消息描述
-
-当前协议版本：
+QtLink 运行在 TCP 字节流之上。每条应用层消息由固定长度 Header 和变长 Body 组成：
 
 ```text
-Version = 1
++------------+---------+-------------+------------+------------------+
+| Magic 4 B  | Ver 1 B | Type 2 B    | Length 4 B | Body Length bytes|
++------------+---------+-------------+------------+------------------+
 ```
 
-截至 Stage 10，QtLink 应用层协议已经定义：
-
-```text
-文本发送请求
-文本消息下发
-在线客户端列表
-文件传输开始请求
-文件传输开始通知
-文件数据块请求
-文件数据块下发
-文件传输结束请求
-文件传输结束通知
-```
-
-其中：
-
-```text
-文本消息与在线客户端列表
-→ 已接入 Client / Server 业务流程
-
-文件传输协议
-→ Stage 10 已完成协议定义和 Codec
-→ Stage 11 开始接入真正的文件发送、接收和进度处理
-```
-
----
-
-# 2. Protocol Layer
-
-QtLink 当前网络层次为：
-
-```text
-QtLink Application Protocol
-        ↓
-TCP
-        ↓
-IP
-        ↓
-Ethernet / Wi-Fi
-```
-
-QtLink 中定义的：
-
-```text
-Packet
-MessageType
-TextMessage
-OnlineClientList
-FileStart
-FileChunk
-FileEnd
-```
-
-全部属于：
-
-```text
-应用层协议
-```
-
-即使 `FileChunk` 使用二进制格式，它仍然属于应用层，而不是传输层。
-
-真正的传输层协议仍然是：
-
-```text
-TCP
-```
-
----
-
-# 3. Packet Format
-
-所有 QtLink 消息统一封装为：
-
-```text
-+-------------+---------+-------------+----------------+------------------+
-| Magic       | Version | MessageType | BodyLength     | Body             |
-+-------------+---------+-------------+----------------+------------------+
-| 4 bytes     | 1 byte  | 2 bytes     | 4 bytes        | BodyLength bytes |
-+-------------+---------+-------------+----------------+------------------+
-```
-
-固定 Header 大小：
-
-```text
-4 + 1 + 2 + 4 = 11 bytes
-```
-
-因此：
-
-```cpp
-HEADER_SIZE = 11
-```
-
----
-
-## 3.1 Magic
-
-长度：
-
-```text
-4 bytes
-```
-
-固定值：
-
-```text
-QLNK
-```
-
-对应：
-
-```text
-'Q' 'L' 'N' 'K'
-```
-
-用于判断当前数据是否属于 QtLink 协议。
-
-Magic 不正确时，该 Packet 被认为是非法协议数据。
-
----
-
-## 3.2 Version
-
-长度：
-
-```text
-1 byte
-```
-
-当前协议版本：
-
-```text
-1
-```
-
-对应：
-
-```cpp
-VERSION = 1
-```
-
-当前实现只接受：
-
-```text
-Version = 1
-```
-
----
-
-## 3.3 MessageType
-
-长度：
-
-```text
-2 bytes
-```
-
-类型：
-
-```cpp
-quint16
-```
-
-当前定义：
-
-| 数值 | MessageType        | 方向            | 说明                           |
-| ---: | ------------------ | --------------- | ------------------------------ |
-|    1 | `TextSendRequest`  | Client → Server | 请求向指定在线客户端发送文本   |
-|    2 | `TextMessage`      | Server → Client | 向目标客户端下发文本           |
-|    3 | `OnlineClientList` | Server → Client | 同步在线客户端列表             |
-|    4 | `FileStartRequest` | Client → Server | 请求开始一次文件传输           |
-|    5 | `FileStart`        | Server → Client | 通知接收方开始接收文件         |
-|    6 | `FileChunkRequest` | Client → Server | 发送一个文件数据块             |
-|    7 | `FileChunk`        | Server → Client | 向接收方下发文件数据块         |
-|    8 | `FileEndRequest`   | Client → Server | 通知服务器文件数据已经发送完成 |
-|    9 | `FileEnd`          | Server → Client | 通知接收方文件数据传输完成     |
-
-接收到未定义的 MessageType 时：
-
-```text
-InvalidData
-```
-
----
-
-## 3.4 BodyLength
-
-长度：
-
-```text
-4 bytes
-```
-
-类型：
-
-```cpp
-quint32
-```
-
-表示：
-
-```text
-Body 的字节长度
-```
-
-当前最大 Body 大小：
-
-```text
-8 MiB
-```
-
-即：
-
-```cpp
-MAX_BODY_SIZE = 8 * 1024 * 1024
-```
-
-如果：
-
-```text
-BodyLength > MAX_BODY_SIZE
-```
-
-则 Packet 非法。
-
----
-
-## 3.5 Body
-
-Body 的具体格式由：
-
-```text
-MessageType
-```
-
-决定。
-
-当前分成两种。
-
-控制消息和文本消息：
-
-```text
-UTF-8 JSON
-```
-
-包括：
-
-```text
-TextSendRequest
-TextMessage
-OnlineClientList
-FileStartRequest
-FileStart
-FileEndRequest
-FileEnd
-```
-
-文件数据块：
-
-```text
-Binary
-```
-
-包括：
-
-```text
-FileChunkRequest
-FileChunk
-```
-
----
-
-# 4. Byte Order
-
-QtLink Header 中所有多字节整数统一使用：
-
-```text
-Big Endian
-```
-
-即大端字节序。
-
-包括：
-
-```text
-MessageType
-BodyLength
-```
-
-FileChunk 中的：
-
-```text
-offset
-```
-
-同样使用：
-
-```text
-Big Endian
-```
-
-大端可以理解为：
-
-```text
-高有效字节先出现
-```
-
-例如：
-
-```text
-0x12345678
-```
-
-按大端编码为：
-
-```text
-12 34 56 78
-```
-
----
-
-# 5. TCP Stream Parsing
-
-TCP 不保证：
-
-```text
-一次 write()
-=
-一次 readyRead()
-=
-一个完整 QtLink Packet
-```
-
-因此每一个 TCP 连接都必须维护独立的：
-
-```cpp
-QByteArray receiveBuffer;
-```
-
-接收过程：
-
-```text
-QTcpSocket::readAll()
-        ↓
-append 到 receiveBuffer
-        ↓
-PacketParser 尝试解析
-```
-
----
-
-## 5.1 Parser Flow
-
-解析流程：
-
-```text
-检查 Header 是否完整
-        ↓
-校验 Magic
-        ↓
-校验 Version
-        ↓
-校验 MessageType
-        ↓
-读取 BodyLength
-        ↓
-校验 MAX_BODY_SIZE
-        ↓
-检查完整 Body 是否已经到达
-        ↓
-解析一个完整 Packet
-```
-
-如果：
-
-```text
-receiveBuffer.size()
-<
-HEADER_SIZE + BodyLength
-```
-
-说明当前发生：
-
-```text
-半包
-```
-
-必须保留现有 receiveBuffer，等待后续数据。
-
----
-
-## 5.2 ParseResult
-
-```cpp
-enum class ParseResult
-{
-    Success,
-    NeedMoreData,
-    InvalidData
-};
-```
-
-### Success
-
-成功解析一个完整 Packet。
-
-只移除：
-
-```text
-当前成功解析的 Packet
-```
-
-后续 Packet 数据继续保留。
-
-### NeedMoreData
-
-当前 TCP 字节不足。
-
-必须：
-
-```text
-保持 receiveBuffer 不变
-```
-
-### InvalidData
-
-数据违反 QtLink 协议。
-
-例如：
-
-```text
-Magic错误
-Version错误
-MessageType非法
-BodyLength超限
-Packet解码失败
-```
-
----
-
-# 6. Text Message Protocol
-
-## 6.1 TextSendRequest
-
-方向：
-
-```text
-Client → Server
-```
-
-MessageType：
-
-```text
-1
-```
-
-JSON Body：
+- Header 总长度：`11` 字节
+- Magic：ASCII `QLNK`
+- Version：`1`
+- MessageType：无符号 16 位整数
+- BodyLength：无符号 32 位整数，只表示 Body 字节数
+- 多字节整数：BigEndian
+- 最大 Body：`8 * 1024 * 1024` 字节（8 MiB）
+
+Header 当前不包含压缩、校验和或加密字段。
+
+## 2. Packet Header
+
+| Offset | 长度 | 字段 | 当前值 / 类型 | 说明 |
+| ---: | ---: | --- | --- | --- |
+| 0 | 4 | Magic | `QLNK` | 协议标识 |
+| 4 | 1 | Version | `1` | 协议版本 |
+| 5 | 2 | MessageType | `quint16` | 消息类型，BigEndian |
+| 7 | 4 | BodyLength | `quint32` | Body 长度，BigEndian |
+| 11 | BodyLength | Body | bytes | JSON、二进制 Chunk 或空 Body |
+
+`PacketCodec` 编码时写入上述字段。解码和解析会拒绝错误 Magic、错误 Version、未定义 MessageType，以及超过 `MAX_BODY_SIZE` 的 BodyLength。
+
+## 3. MessageType 与方向
+
+| 数值 | MessageType | 方向 | Body |
+| ---: | --- | --- | --- |
+| 1 | `TextSendRequest` | Client → Server | JSON |
+| 2 | `TextMessage` | Server → Client | JSON |
+| 3 | `OnlineClientList` | Server → Client | JSON |
+| 4 | `FileStartRequest` | Client → Server | JSON |
+| 5 | `FileStart` | Server → Client | JSON |
+| 6 | `FileChunkRequest` | Client → Server | Binary |
+| 7 | `FileChunk` | Server → Client | Binary |
+| 8 | `FileEndRequest` | Client → Server | JSON |
+| 9 | `FileEnd` | Server → Client | JSON |
+| 10 | `FileAbortRequest` | Client → Server | JSON |
+| 11 | `FileAbort` | Server → Client | JSON |
+| 12 | `FileCompleteRequest` | Client → Server | JSON |
+| 13 | `FileComplete` | Server → Client | JSON |
+| 14 | `HeartbeatRequest` | Client → Server | 空 |
+| 15 | `HeartbeatResponse` | Server → Client | 空 |
+
+`isValidMessageType()` 只判断数值是否属于当前协议。Client 和 Server 的分发 switch 还会分别检查消息方向：Server 不接受 Server → Client 类型，Client 不接受 Client → Server 类型。
+
+## 4. JSON Body 约定
+
+JSON 消息使用 UTF-8 Compact JSON。解码要求根节点为 object，并校验必需字段、字段类型和数值范围。下面为了阅读采用格式化展示；实际发送内容不带多余空白。
+
+### 4.1 TextSendRequest
+
+Client 请求向指定在线客户端发送文本：
 
 ```json
 {
@@ -487,44 +69,14 @@ JSON Body：
 }
 ```
 
-字段：
+- `receiverId`：大于 0 且不超过 `quint32` 最大值的整数
+- `content`：字符串
 
-| 字段         | 类型    | 说明                  |
-| ------------ | ------- | --------------------- |
-| `receiverId` | integer | 目标客户端当前连接 ID |
-| `content`    | string  | 文本内容              |
+Client 不提供 `senderId`。Server 从当前 TCP Session 获得发送者身份。
 
-要求：
+### 4.2 TextMessage
 
-```text
-receiverId > 0
-receiverId <= quint32 最大值
-receiverId 必须为整数
-```
-
-Client 不提交：
-
-```text
-senderId
-```
-
----
-
-## 6.2 TextMessage
-
-方向：
-
-```text
-Server → Client
-```
-
-MessageType：
-
-```text
-2
-```
-
-JSON Body：
+Server 向接收 Client 下发文本：
 
 ```json
 {
@@ -533,33 +85,12 @@ JSON Body：
 }
 ```
 
-Server 根据当前连接 Session 得到真实：
+- `senderId`：大于 0 且不超过 `quint32` 最大值的整数
+- `content`：字符串
 
-```text
-senderId
-```
+### 4.3 OnlineClientList
 
-不能信任客户端自行声明发送者身份。
-
----
-
-# 7. Online Client List
-
-## 7.1 OnlineClientList
-
-方向：
-
-```text
-Server → Client
-```
-
-MessageType：
-
-```text
-3
-```
-
-JSON Body：
+Server 为每个 Client 分别生成在线列表：
 
 ```json
 {
@@ -568,262 +99,21 @@ JSON Body：
 }
 ```
 
-字段：
+- `selfId`：该接收连接自己的临时 `clientId`
+- `clientIds`：当前在线 `clientId` 数组，元素均为合法非零 `quint32`
+- `selfId` 必须出现在 `clientIds` 中
 
-| 字段        | 类型          | 说明                        |
-| ----------- | ------------- | --------------------------- |
-| `selfId`    | integer       | 当前客户端自己的临时连接 ID |
-| `clientIds` | integer array | 当前可以通信的在线客户端 ID |
+## 5. 文件传输控制消息
 
-要求：
-
-```text
-selfId > 0
-clientIds 中所有 ID > 0
-selfId 必须存在于 clientIds
-```
-
-Client UI 根据：
-
-```text
-selfId
-```
-
-排除自己。
-
----
-
-# 8. Connection Identity
-
-当前 QtLink V1 没有：
-
-```text
-账号系统
-登录系统
-永久 userId
-好友系统
-```
-
-Server 为每一次 TCP 连接分配：
-
-```text
-clientId
-```
-
-例如：
-
-```text
-Client A → 1
-Client B → 2
-Client C → 3
-```
-
-clientId 只在当前连接生命周期中有效。
-
-断开并重新连接后：
-
-```text
-clientId 可能改变
-```
-
-因此：
-
-```text
-clientId
-senderId
-receiverId
-selfId
-```
-
-都不能被理解为永久用户身份。
-
----
-
-# 9. Directed Text Routing
-
-假设：
-
-```text
-Client A = 1
-Client B = 2
-Client C = 3
-```
-
-A 向 B 发送：
-
-```json
-{
-  "receiverId": 2,
-  "content": "hello"
-}
-```
-
-Server 从 A 当前 Session 得到：
-
-```text
-senderId = 1
-```
-
-然后通过：
-
-```cpp
-m_sessions.find(receiverId)
-```
-
-查找：
-
-```text
-receiverId
-→ ClientSession
-→ QTcpSocket
-```
-
-再构造：
-
-```json
-{
-  "senderId": 1,
-  "content": "hello"
-}
-```
-
-只发送给：
-
-```text
-Client B
-```
-
-Client C 不会收到。
-
----
-
-# 10. Server Session Model
-
-当前 Server 使用：
-
-```cpp
-QHash<quint32, ClientSession> m_sessions;
-```
-
-逻辑关系：
-
-```text
-clientId
-   ↓
-ClientSession
-├── QTcpSocket*
-└── receiveBuffer
-```
-
-每一个客户端拥有独立：
-
-```cpp
-QByteArray receiveBuffer;
-```
-
-避免不同 TCP 连接的数据互相混合。
-
----
-
-# 11. File Transfer Identity
-
-每一次文件传输拥有独立：
-
-```text
-transferId
-```
-
-它和：
-
-```text
-clientId
-```
-
-不是同一个概念。
-
-区别：
-
-```text
-clientId
-→ 标识当前 TCP 客户端连接
-
-transferId
-→ 标识一次具体文件传输
-```
-
----
-
-## 11.1 transferId Format
-
-QtLink 使用：
-
-```text
-UUID
-```
-
-作为 transferId。
-
-业务层统一表示为：
+`transferId` 必须是合法、非 Null UUID。Codec 会统一规范化为 `QUuid::WithoutBraces` 的小写字符串形式，例如：
 
 ```text
 550e8400-e29b-41d4-a716-446655440000
 ```
 
-即：
+### 5.1 FileStartRequest
 
-```cpp
-QUuid::WithoutBraces
-```
-
-格式。
-
-以下形式：
-
-```text
-{550e8400-e29b-41d4-a716-446655440000}
-```
-
-如果是合法 UUID，可以在 Codec 中规范化为：
-
-```text
-550e8400-e29b-41d4-a716-446655440000
-```
-
-非法 UUID：
-
-```text
-abc
-123
-hello
-```
-
-必须拒绝。
-
----
-
-# 12. FileStartRequest
-
-方向：
-
-```text
-Client → Server
-```
-
-MessageType：
-
-```text
-4
-```
-
-作用：
-
-通知 Server：
-
-```text
-我要开始一次文件传输
-```
-
-JSON Body：
+Client → Server：
 
 ```json
 {
@@ -834,69 +124,14 @@ JSON Body：
 }
 ```
 
-字段：
+- `receiverId`：合法非零 `quint32`
+- `transferId`：合法 UUID
+- `fileName`：非空字符串
+- `fileSize`：大于或等于 0 的整数，允许零字节文件
 
-| 字段         | 类型         | 说明                  |
-| ------------ | ------------ | --------------------- |
-| `receiverId` | integer      | 文件目标客户端连接 ID |
-| `transferId` | string(UUID) | 本次文件传输唯一标识  |
-| `fileName`   | string       | 文件名                |
-| `fileSize`   | integer      | 文件总字节数          |
+### 5.2 FileStart
 
-要求：
-
-```text
-receiverId > 0
-
-transferId
-→ 必须是合法 UUID
-
-fileName
-→ 非空
-
-fileSize
-→ >= 0
-```
-
-允许：
-
-```text
-fileSize = 0
-```
-
-即零字节文件。
-
-fileName 只表示：
-
-```text
-report.pdf
-```
-
-不应该包含发送方完整本地路径，例如：
-
-```text
-C:\Users\xxx\Documents\report.pdf
-```
-
----
-
-# 13. FileStart
-
-方向：
-
-```text
-Server → Client
-```
-
-MessageType：
-
-```text
-5
-```
-
-Server 不直接转发 Client 的 FileStartRequest。
-
-而是重新构造：
+Server → Client：
 
 ```json
 {
@@ -907,289 +142,11 @@ Server 不直接转发 Client 的 FileStartRequest。
 }
 ```
 
-字段：
+字段规则与 `FileStartRequest` 相同，但目标 `receiverId` 被 Server 根据 Session 验证后移除，改为由 Server 写入可信的 `senderId`。
 
-| 字段         | 类型         | 说明                      |
-| ------------ | ------------ | ------------------------- |
-| `senderId`   | integer      | 文件实际发送者当前连接 ID |
-| `transferId` | string(UUID) | 本次文件传输唯一标识      |
-| `fileName`   | string       | 文件名                    |
-| `fileSize`   | integer      | 文件总字节数              |
+### 5.3 FileEndRequest / FileEnd
 
-senderId 必须由：
-
-```text
-Server 当前发送连接 Session
-```
-
-确定。
-
-不能由发送方客户端自行声明。
-
----
-
-# 14. FileChunk Protocol
-
-文件数据块不使用 JSON。
-
-原因是文件内容本身属于：
-
-```text
-任意二进制数据
-```
-
-如果放入 JSON，通常需要：
-
-```text
-Base64
-```
-
-等额外编码，会增加数据量和编解码成本。
-
-因此：
-
-```text
-FileChunkRequest
-FileChunk
-```
-
-统一采用二进制 Body。
-
----
-
-## 14.1 FileChunkRequest
-
-方向：
-
-```text
-Client → Server
-```
-
-MessageType：
-
-```text
-6
-```
-
----
-
-## 14.2 FileChunk
-
-方向：
-
-```text
-Server → Client
-```
-
-MessageType：
-
-```text
-7
-```
-
-FileChunkRequest 和 FileChunk 使用相同 Body Schema：
-
-```text
-+----------------+----------------+----------------------+
-| transferId     | offset         | chunkData            |
-+----------------+----------------+----------------------+
-| 16 bytes       | 8 bytes        | remaining bytes      |
-+----------------+----------------+----------------------+
-```
-
----
-
-## 14.3 transferId Binary Format
-
-transferId 使用 UUID 的：
-
-```cpp
-QUuid::toRfc4122()
-```
-
-表示。
-
-固定长度：
-
-```text
-16 bytes
-```
-
-解码使用：
-
-```cpp
-QUuid::fromRfc4122()
-```
-
-然后统一转换为：
-
-```cpp
-QUuid::WithoutBraces
-```
-
-字符串形式。
-
----
-
-## 14.4 offset
-
-offset 类型：
-
-```cpp
-qint64
-```
-
-长度：
-
-```text
-8 bytes
-```
-
-使用：
-
-```text
-Big Endian
-```
-
-编码。
-
-offset 表示：
-
-> 当前 chunkData 在完整文件中的起始字节位置。
-
-例如标准 Chunk 为 65536 bytes 时：
-
-```text
-Chunk 1:
-offset = 0
-
-Chunk 2:
-offset = 65536
-
-Chunk 3:
-offset = 131072
-```
-
-要求：
-
-```text
-offset >= 0
-```
-
-负 offset 非法。
-
----
-
-## 14.5 chunkData
-
-固定元数据长度：
-
-```text
-16 + 8 = 24 bytes
-```
-
-因此：
-
-```text
-chunkData
-=
-Body 中第 24 字节之后的全部数据
-```
-
-不单独存：
-
-```text
-chunkLength
-```
-
-因为外层 Packet 已经存在：
-
-```text
-BodyLength
-```
-
-所以：
-
-```text
-chunkLength
-=
-BodyLength - 24
-```
-
----
-
-## 14.6 Empty Chunk
-
-当前协议规定：
-
-```text
-FileChunk 必须包含实际文件数据
-```
-
-因此：
-
-```text
-Body.size() <= 24
-```
-
-视为非法 FileChunk。
-
-零字节文件不发送 FileChunk。
-
-零字节文件流程可以直接：
-
-```text
-FileStart
-→ FileEnd
-```
-
----
-
-## 14.7 Binary Safety
-
-chunkData 可以包含任意字节，包括：
-
-```text
-0x00
-0x80
-0xFF
-```
-
-不能按照：
-
-```text
-C字符串
-UTF-8字符串
-JSON字符串
-```
-
-解释。
-
-它必须作为原始：
-
-```cpp
-QByteArray
-```
-
-处理。
-
----
-
-# 15. FileEndRequest
-
-方向：
-
-```text
-Client → Server
-```
-
-MessageType：
-
-```text
-8
-```
-
-JSON Body：
+两种消息方向不同，Body 相同：
 
 ```json
 {
@@ -1197,29 +154,11 @@ JSON Body：
 }
 ```
 
-表示：
+`FileEndRequest` 表示 Sender 已提交声明范围内的全部 Chunk。Server 验证 `nextOffset == fileSize` 后向 Receiver 发送 `FileEnd`，并进入等待 Receiver 最终确认的阶段。
 
-```text
-发送方已经完成该 transferId 对应文件的数据发送
-```
+### 5.4 FileCompleteRequest / FileComplete
 
----
-
-# 16. FileEnd
-
-方向：
-
-```text
-Server → Client
-```
-
-MessageType：
-
-```text
-9
-```
-
-Body 与 FileEndRequest 相同：
+两种消息复用 transferId-only Body：
 
 ```json
 {
@@ -1227,439 +166,77 @@ Body 与 FileEndRequest 相同：
 }
 ```
 
-因为两者 Body Schema 完全一致，所以：
+Receiver 在文件大小验证、flush 和 close 成功后发送 `FileCompleteRequest`。Server 验证请求者确为该 transfer 的 Receiver 且阶段正确，再向 Sender 发送 `FileComplete` 并删除 ActiveTransfer。
+
+### 5.5 FileAbortRequest / FileAbort
+
+两种消息复用相同 Body：
+
+```json
+{
+  "transferId": "550e8400-e29b-41d4-a716-446655440000",
+  "reason": 2
+}
+```
+
+`reason` 对应 `FileAbortReason`：
+
+| 数值 | 名称 | 含义 |
+| ---: | --- | --- |
+| 1 | `PeerDisconnected` | 对端连接断开 |
+| 2 | `IoError` | 本地文件 I/O 失败 |
+| 3 | `Cancelled` | 传输取消原因；当前 UI 未提供主动取消入口 |
+| 4 | `ProtocolError` | 文件传输状态或数据违反协议 |
+| 5 | `Timeout` | 文件传输长期无进展 |
+
+Server 只允许 transfer 的 Sender 或 Receiver 提交 `FileAbortRequest`。Abort、Complete 和 disconnect 按 Server 首个验证成功并处理的终态事件收敛。
+
+## 6. FileChunk 二进制 Body
+
+`FileChunkRequest` 和 `FileChunk` 方向不同，Body 布局相同：
 
 ```text
-FileEndRequest
-FileEnd
++----------------------+------------------+----------------------+
+| UUID RFC 4122 16 B   | Offset qint64 8 B| ChunkData 1..65536 B|
++----------------------+------------------+----------------------+
 ```
 
-共用同一个：
+| Offset | 长度 | 字段 | 说明 |
+| ---: | ---: | --- | --- |
+| 0 | 16 | transferId | `QUuid::toRfc4122()` 的 16 字节表示，Null UUID 非法 |
+| 16 | 8 | offset | 有符号 `qint64`，BigEndian，必须大于或等于 0 |
+| 24 | 1..65536 | chunkData | 原始二进制数据，可包含 `0x00` 和任意非文本字节 |
+
+Body 至少为 25 字节；只有 24 字节元数据而没有 Chunk 数据时解码失败。单个 Chunk 最大为 64 KiB。Server 还会验证 offset 必须严格等于 ActiveTransfer 的 `nextOffset`，并且 Chunk 不能超过声明的 `fileSize`。
+
+零字节文件不发送 FileChunk，直接走 Start → End → Complete 流程。
+
+## 7. Heartbeat
+
+`HeartbeatRequest` 和 `HeartbeatResponse` 的 Body 必须严格为空：
 
 ```text
-encodeEnd()
-decodeEnd()
+BodyLength = 0
 ```
 
-Codec。
+Client 定时发送 `HeartbeatRequest`，Server 回复 `HeartbeatResponse`。任意完整合法 Packet 都可以刷新相应连接的活动时间；Heartbeat 用于在没有业务数据时检测失活连接，不承载业务字段。
 
-MessageType 决定消息语义和方向，而 Codec 只负责 Body 格式。
+## 8. TCP 粘包与半包处理
 
----
+TCP 只提供有序字节流，不保留应用消息边界。QtLink 在 Client 和每个 Server `ClientSession` 中分别维护 persistent receive buffer：
 
-# 17. File Transfer Message Flow
+1. `readyRead` 将 `readAll()` 结果追加到当前连接的 buffer；
+2. buffer 少于 11 字节时返回 `NeedMoreData`；
+3. Header 完整后先校验 Magic、Version、MessageType 和 BodyLength；
+4. 完整 Packet 尚未到达时保留全部数据并返回 `NeedMoreData`；
+5. 完整 Packet 到达后输出当前 Packet，只从 buffer 前端移除该 Packet；
+6. 调用方继续循环解析 buffer 中的后续 Packet。
 
-完整文件传输协议流程为：
+因此同一逻辑同时支持：
 
-```text
-Client A
-   │
-   │ FileStartRequest
-   ▼
- Server
-   │
-   │ FileStart
-   ▼
-Client B
-```
+- 单个完整 Packet；
+- Header 或 Body 分多次到达；
+- 多个 Packet 一次到达；
+- 一个完整 Packet 后紧跟下一 Packet 的部分数据。
 
-然后：
-
-```text
-Client A
-   │
-   │ FileChunkRequest
-   ▼
- Server
-   │
-   │ FileChunk
-   ▼
-Client B
-```
-
-上述 Chunk 过程重复多次。
-
-最后：
-
-```text
-Client A
-   │
-   │ FileEndRequest
-   ▼
- Server
-   │
-   │ FileEnd
-   ▼
-Client B
-```
-
----
-
-# 18. File Transfer Routing Principle
-
-只有：
-
-```text
-FileStartRequest
-```
-
-需要显式携带：
-
-```text
-receiverId
-```
-
-后续：
-
-```text
-FileChunkRequest
-FileEndRequest
-```
-
-只需要：
-
-```text
-transferId
-```
-
-Server 后续将根据 transferId 对应的文件传输状态确定：
-
-```text
-senderId
-receiverId
-fileSize
-当前offset
-```
-
-因此不需要在每个 FileChunk 中重复携带 receiverId。
-
-这可以避免：
-
-```text
-FileStart 指定 Client 2
-
-后续某个 Chunk 又突然指定 Client 3
-```
-
-这种不一致情况。
-
----
-
-# 19. File Chunk Size
-
-Stage 11 计划采用的默认文件读取粒度：
-
-```text
-64 KiB
-```
-
-即：
-
-```text
-64 × 1024
-=
-65536 bytes
-```
-
-注意：
-
-```text
-64 KiB
-```
-
-只是：
-
-```text
-QtLink应用层文件分块大小
-```
-
-不是：
-
-```text
-TCP Segment大小
-MTU
-```
-
-TCP 和底层网络仍会根据自身机制继续分段传输。
-
----
-
-# 20. MAX_BODY_SIZE and FileChunk
-
-当前：
-
-```text
-MAX_BODY_SIZE = 8 MiB
-```
-
-FileChunk Body 包含：
-
-```text
-16 bytes UUID
-+
-8 bytes offset
-+
-chunkData
-```
-
-因此正常的：
-
-```text
-64 KiB chunkData
-```
-
-远小于协议 Body 最大限制。
-
-外层 PacketParser 仍然负责：
-
-```text
-BodyLength <= MAX_BODY_SIZE
-```
-
-校验。
-
----
-
-# 21. Packet Encoding Relationship
-
-文件 Chunk 的编码存在两个不同层级。
-
-第一层：
-
-```text
-FileChunkCodec
-```
-
-负责：
-
-```text
-transferId
-offset
-chunkData
-        ↓
-[16-byte UUID][8-byte offset][chunkData]
-        ↓
-QByteArray Body
-```
-
-第二层：
-
-```text
-PacketCodec
-```
-
-负责：
-
-```text
-QtLink Header
-+
-FileChunk Body
-        ↓
-完整 QtLink Packet QByteArray
-```
-
-最终：
-
-```cpp
-QTcpSocket::write()
-```
-
-发送完整 Packet。
-
-`PacketCodec` 不会重新解释或转换 FileChunk Body。
-
-Body 通过：
-
-```cpp
-writeRawData(
-    packet.body.constData(),
-    packet.body.size());
-```
-
-按原始字节写入完整 Packet。
-
----
-
-# 22. Protocol Validation Rules
-
-QtLink 当前主要协议规则：
-
-1. Magic 必须为：
-
-```text
-QLNK
-```
-
-2. Version 必须为：
-
-```text
-1
-```
-
-3. MessageType 必须属于当前定义范围。
-
-4. 多字节协议整数使用 Big Endian。
-
-5. BodyLength 不得超过：
-
-```text
-8 MiB
-```
-
-6. Parser 必须正确处理粘包。
-
-7. Parser 必须正确处理半包。
-
-8. NeedMoreData 时不得破坏 receiveBuffer。
-
-9. Success 时只移除当前完整 Packet。
-
-10. 每个 TCP 连接必须维护独立 receiveBuffer。
-
-11. clientId 是临时连接 ID，不是永久 userId。
-
-12. senderId 由 Server 根据连接 Session 确定。
-
-13. receiverId 必须对应当前有效目标连接。
-
-14. Client 与 Server 都不能把 senderId 当作客户端可信输入。
-
-15. transferId 必须是合法 UUID。
-
-16. transferId 在业务层统一使用 QUuid::WithoutBraces 格式。
-
-17. FileStartRequest 携带 receiverId。
-
-18. FileStart 携带 senderId。
-
-19. FileChunkRequest / FileChunk 共用相同二进制 Body。
-
-20. FileEndRequest / FileEnd 共用相同 JSON Body。
-
-21. FileChunk offset 必须 >= 0。
-
-22. FileChunk 必须包含非空 chunkData。
-
-23. 零字节文件允许不产生任何 FileChunk。
-
-24. 文件原始数据不得作为普通文本字符串解释。
-
-25. Server 重新编码业务消息后仍必须保证输出 Body 满足 MAX_BODY_SIZE。
-
----
-
-# 23. Current Automated Tests
-
-协议测试当前覆盖：
-
-```text
-PacketCodec
-PacketParser
-TextMessageCodec
-OnlineClientListCodec
-FileTransferControlCodec
-FileChunkCodec
-MessageType validation
-```
-
-文件协议测试包括：
-
-```text
-FileStartRequest 正常往返
-FileStart 正常往返
-零字节文件
-receiverId / senderId 边界
-字段缺失
-字段类型错误
-合法 / 非法 UUID
-UUID 格式规范化
-FileEnd 正常及非法输入
-FileChunk 二进制往返
-0x00 / 0x80 / 0xFF 原始字节
-非零 offset
-短数据
-缺失 payload
-Null UUID
-负 offset
-decode失败后输出参数保持原值
-```
-
-当前完整协议测试集已经通过。
-
----
-
-# 24. Stage 10 Boundary
-
-截至 Stage 10：
-
-```text
-文件传输 MessageType
-✅
-
-FileStartRequest / FileStart Codec
-✅
-
-FileChunkRequest / FileChunk Codec
-✅
-
-FileEndRequest / FileEnd Codec
-✅
-
-UUID transferId 规则
-✅
-
-offset 二进制格式
-✅
-
-文件协议自动测试
-✅
-```
-
-但以下功能尚未在 Stage 10 实现：
-
-```text
-文件选择
-QFile读取
-真正发送FileStart
-真正循环发送FileChunk
-接收端创建文件
-接收端写盘
-文件传输进度
-发送背压控制
-文件传输Session业务状态
-```
-
-这些属于：
-
-```text
-Stage 11
-```
-
----
-
-# 25. Future Protocol Extensions
-
-后续预计继续增加：
-
-```text
-Heartbeat
-Reconnect相关状态
-可选文件完整性校验
-可选断点续传
-```
-
-新增协议能力时继续遵循：
-
-```text
-统一 Packet Framing
-+
-明确 MessageType
-+
-明确 Body Schema
-+
-严格 Decode 校验
-+
-自动测试
-```
-
-不能绕过现有 PacketParser 在同一个 TCP Socket 上另外定义一套不兼容的流解析方式。
+解析出非法 Header 时，当前实现把它视为 connection-level protocol error 并终止该连接，而不是尝试在任意字节位置重新同步 Magic。
