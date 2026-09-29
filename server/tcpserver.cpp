@@ -19,6 +19,7 @@ TcpServer::TcpServer(QObject *parent)
     ,m_clientWatchTimer(new QTimer(this))
 {
     connect(m_server,&QTcpServer::newConnection,this,&TcpServer::handleNewConnection);
+
     connect(m_transferWatchTimer,&QTimer::timeout,
             this,&TcpServer::checkStalledTransfers);
     connect(m_clientWatchTimer,&QTimer::timeout,
@@ -84,6 +85,7 @@ void TcpServer::handleNewConnection()
                             .arg(clientId)
                             .arg(socket->peerAddress().toString())
                             .arg(socket->peerPort()));
+
         connect(socket,&QTcpSocket::disconnected,this,[this,socket,clientId](){
             cleanupTransfersForClient(clientId);
             m_sessions.remove(clientId);
@@ -206,14 +208,11 @@ void TcpServer::broadcastOnlineClientList()
 {
     QList<quint32>clientIds;
 
-    for(auto it=m_sessions.cbegin();
-         it!=m_sessions.cend();
-         it++){
+    for(auto it=m_sessions.cbegin();it!=m_sessions.cend();it++){
 
         QTcpSocket*socket=it.value().socket;
 
-        if(socket
-            && socket->state()==
+        if(socket&& socket->state()==
                    QAbstractSocket::ConnectedState){
 
             clientIds.append(it.key());

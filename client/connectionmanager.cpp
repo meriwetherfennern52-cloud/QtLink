@@ -50,6 +50,7 @@ void ConnectionManager::connectToServer(const QString &host, quint16 port)
     m_receiveBuffer.clear();
     m_reconnectTimer->stop();
     m_reconnectDelayMs=INITIAL_RECONNECT_DELAY_MS;
+
     m_connectionDesired=true;
     m_host=host;
     m_port=port;

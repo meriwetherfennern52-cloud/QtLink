@@ -40,18 +40,17 @@ MainWindow::MainWindow(const QString &databasePath,QWidget *parent)
     }
 
     connect(m_connectionManager,&ConnectionManager::disconnected,this,&MainWindow::handleDisconnected);
-    connect(m_connectionManager,&ConnectionManager::connectionError,this,&MainWindow::handleConnectionError);
-    connect(m_connectionManager,
-            &ConnectionManager::operationError,
-            this,
-            [this](const QString &message)
+    connect(m_connectionManager,&ConnectionManager::connectionError,
+            this,&MainWindow::handleConnectionError);
+    connect(m_connectionManager,&ConnectionManager::operationError,
+            this,[this](const QString &message)
             {
                 ui->statusbar->showMessage(message);
             });
+
     connect(m_connectionManager,&ConnectionManager::textMessageReceived,this,&MainWindow::handleTextMessageReceived);
-    connect(m_connectionManager,
-            &ConnectionManager::onlineClientListReceived,this,
-            &MainWindow::handleOnlineClientListReceived);
+    connect(m_connectionManager,&ConnectionManager::onlineClientListReceived,
+            this,&MainWindow::handleOnlineClientListReceived);
     connect(ui->receiverComboBox,&QComboBox::currentIndexChanged,this,
             [this](int index){
                 ui->sendBtn->setEnabled(index>=0);
