@@ -253,6 +253,9 @@ void TcpServer::handleFileStartRequest(quint32 senderId, const QByteArray &body)
 
     if(!Protocol::FileTransferControlCodec::decodeStartRequest(
             body,receiverId,transferId,fileName,fileSize)){
+        emit logMessage(QString("Client %1 sent an invalid file start request")
+                .arg(senderId));
+        scheduleClientDisconnect(senderId);
         return;
     }
 
@@ -313,6 +316,7 @@ void TcpServer::handleTextSendRequest(quint32 senderId, const QByteArray &body)
     QString content;
     if(!Protocol::TextMessageCodec::decodeSendRequest(body,receiverId,content)){
         emit logMessage(QString("Client%1 sent an invalid text request").arg(senderId));
+        scheduleClientDisconnect(senderId);
         return;
     }
 
@@ -373,10 +377,9 @@ void TcpServer::handleTextSendRequest(quint32 senderId, const QByteArray &body)
     }
 
     emit logMessage(
-        QString("Client %1 -> Client %2: %3")
+        QString("Text message forwarded: Client %1 -> Client %2")
             .arg(senderId)
-            .arg(receiverId)
-            .arg(content));
+            .arg(receiverId));
 }
 
 void TcpServer::handleFileChunkRequest(quint32 senderId, const QByteArray &body)

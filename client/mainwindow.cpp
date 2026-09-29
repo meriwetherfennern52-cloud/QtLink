@@ -13,7 +13,8 @@ MainWindow::MainWindow(const QString &databasePath,QWidget *parent)
     ,m_databaseManager(databasePath)
 {
     ui->setupUi(this);
-    ui->statusbar->showMessage("Disconnected");
+    handleConnectionStateChanged(
+        ConnectionManager::ConnectionState::Disconnected);
 
     QString databaseError;
     if(!m_databaseManager.initialize(databaseError)){
@@ -26,8 +27,6 @@ MainWindow::MainWindow(const QString &databasePath,QWidget *parent)
             ui->statusbar->showMessage(
                 QStringLiteral("Failed to load message history:%1").arg(databaseError));
         }else{
-            qDebug() << "Loaded messages:"
-                     << messages.size();
             for(const MessageRecord &record:messages){
                 if(record.direction==MessageDirection::Sent){
                     ui->messageDisplay->appendPlainText(
@@ -77,8 +76,6 @@ MainWindow::MainWindow(const QString &databasePath,QWidget *parent)
     connect(m_connectionManager,&ConnectionManager::connectionStateChanged,
             this,&MainWindow::handleConnectionStateChanged);
 
-    handleConnectionStateChanged(
-        ConnectionManager::ConnectionState::Disconnected);
 }
 
 MainWindow::~MainWindow()

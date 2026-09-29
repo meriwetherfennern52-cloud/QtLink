@@ -62,3 +62,30 @@ add_test(
     NAME stage14_tests
     COMMAND stage14_tests
 )
+
+add_executable(stage15_integration_tests
+    stage15_integration_tests.cpp
+    ../server/tcpserver.cpp
+    ../client/connectionmanager.cpp
+    ../client/filetransfermanager.cpp
+    ../client/databasemanager.cpp
+)
+
+target_include_directories(stage15_integration_tests
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/server
+        ${CMAKE_SOURCE_DIR}/client
+)
+
+target_link_libraries(stage15_integration_tests
+    PRIVATE
+        Qt${QT_VERSION_MAJOR}::Test
+        Qt${QT_VERSION_MAJOR}::Network
+        Qt${QT_VERSION_MAJOR}::Sql
+        qtlink_protocol
+)
+
+add_test(
+    NAME stage15_integration_tests
+    COMMAND stage15_integration_tests
+)

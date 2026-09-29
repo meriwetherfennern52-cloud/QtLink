@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 
 #include <QApplication>
+#include <QDebug>
 #include <QDir>
 #include<QStandardPaths>
 
@@ -19,8 +20,7 @@ int main(int argc, char *argv[])
         return -1;
     }
     const QString databasePath=QDir(appDataPath).filePath("qtlink.db");
-    qDebug() << "Database path:"
-             << databasePath;
+    qInfo() << "Database path:" << databasePath;
     MainWindow w(databasePath);
     w.show();
     return QApplication::exec();

@@ -8,6 +8,7 @@
 #include"onlineclientlistcodec.h"
 #include"filetransfercontrolcodec.h"
 #include"filechunkcodec.h"
+#include<QDebug>
 #include<QTimer>
 
 ConnectionManager::ConnectionManager(QObject *parent)
@@ -184,8 +185,6 @@ void ConnectionManager::handleReadyRead()
 {
     QByteArray newData=m_socket->readAll();
     m_receiveBuffer.append(newData);
-    // qDebug() << "new data size:" << newData.size()
-    //          << "receive buffer size:" << m_receiveBuffer.size();
     while(true){
         Protocol::Packet packet;
         Protocol::ParseResult result=Protocol::PacketParser::tryParse(
@@ -209,7 +208,8 @@ void ConnectionManager::handleReadyRead()
             if(!Protocol::TextMessageCodec::decodeTextMessage(
                     packet.body,senderId,content)){
                 emit operationError("Invalid text message");
-                break;
+                disconnectFromServer();
+                return;
             }
             m_lastServerActivityMs=m_connectionClock.elapsed();
             emit textMessageReceived(senderId,content);
@@ -222,7 +222,8 @@ void ConnectionManager::handleReadyRead()
                     packet.body,selfId,clientIds)){
                 emit operationError(QStringLiteral(
                         "Failed to decode online client list."));
-                break;
+                disconnectFromServer();
+                return;
             }
             m_lastServerActivityMs=m_connectionClock.elapsed();
             emit onlineClientListReceived(selfId,clientIds);
@@ -236,7 +237,8 @@ void ConnectionManager::handleReadyRead()
             if(!Protocol::FileTransferControlCodec::decodeStart(
                     packet.body,senderId,transferId,fileName,fileSize)){
                 emit operationError("Invalid file start message from server.");
-                break;
+                disconnectFromServer();
+                return;
             }
             m_lastServerActivityMs=m_connectionClock.elapsed();
             emit fileStartReceived(senderId,transferId,fileName,fileSize);
@@ -249,7 +251,8 @@ void ConnectionManager::handleReadyRead()
 
             if(!Protocol::FileChunkCodec::decode(packet.body,transferId,offset,chunkData)){
                 emit operationError("Invalid file chunk from server.");
-                break;
+                disconnectFromServer();
+                return;
             }
 
             m_lastServerActivityMs=m_connectionClock.elapsed();
@@ -261,7 +264,8 @@ void ConnectionManager::handleReadyRead()
             QString transferId;
             if(!Protocol::FileTransferControlCodec::decodeEnd(packet.body,transferId)){
                 emit operationError("Invalid file end message from server.");
-                break;
+                disconnectFromServer();
+                return;
             }
             m_lastServerActivityMs=m_connectionClock.elapsed();
             emit fileEndReceived(transferId);
@@ -317,6 +321,7 @@ void ConnectionManager::handleSocketDisconnected()
 {
     m_heartbeatTimer->stop();
     m_receiveBuffer.clear();
+    qInfo() << "Disconnected from server";
     emit disconnected();
     if(m_connectionDesired){
         scheduleReconnect();
@@ -341,6 +346,7 @@ void ConnectionManager::handleSocketConnected()
     m_reconnectTimer->stop();
     m_reconnectDelayMs=INITIAL_RECONNECT_DELAY_MS;
 
+    qInfo() << "Connected to server" << m_host << m_port;
     emit connected();
 }
 
@@ -353,6 +359,7 @@ void ConnectionManager::handleHeartbeatTimer()
 
     const qint64 now=m_connectionClock.elapsed();
     if(now-m_lastServerActivityMs>=SERVER_TIMEOUT_MS){
+        qWarning() << "Server heartbeat timed out";
         emit connectionError("Server heartbeat timed out.");
         abortConnectionForReconnect();
         return;
@@ -371,7 +378,7 @@ bool ConnectionManager::writePacket(const Protocol::Packet &packet)
     }
 
     if(packet.body.size()>static_cast<qsizetype>(Protocol::MAX_BODY_SIZE)){
-        emit operationError("Message id too large");
+        emit operationError("Message body is too large");
         return false;
     }
 
@@ -406,6 +413,7 @@ void ConnectionManager::attemptReconnect()
     setConnectionState(ConnectionState::Connecting);
 
     m_receiveBuffer.clear();
+    qInfo() << "Reconnect attempt to" << m_host << m_port;
     m_socket->connectToHost(m_host,m_port);
 }
 
@@ -425,6 +433,7 @@ void ConnectionManager::scheduleReconnect()
 
     setConnectionState(ConnectionState::Reconnecting);
 
+    qInfo() << "Reconnect scheduled in" << m_reconnectDelayMs << "ms";
     m_reconnectTimer->start(m_reconnectDelayMs);
     m_reconnectDelayMs=qMin(m_reconnectDelayMs*2,MAX_RECONNECT_DELAY_MS);
 }

@@ -3,6 +3,7 @@
 #include<QFileInfo>
 #include"connectionManager.h"
 #include<QDir>
+#include<QDebug>
 #include<QFile>
 #include"filechunkcodec.h"
 #include<QStandardPaths>
@@ -245,6 +246,8 @@ void FileTransferManager::abortOutgoingTransfer(Protocol::FileAbortReason reason
     }
 
     const QString transferId=m_sendTransferId;
+    qWarning() << "Outgoing file transfer aborted:"
+               << transferId << "reason" << static_cast<int>(reason);
 
     /*
      * 先结束本地发送状态。
@@ -296,6 +299,8 @@ void FileTransferManager::cleanupIncomingTransfer(const QString &transferId)
 
 void FileTransferManager::abortIncomingTransfer(const QString &transferId, Protocol::FileAbortReason reason)
 {
+    qWarning() << "Incoming file transfer aborted:"
+               << transferId << "reason" << static_cast<int>(reason);
     cleanupIncomingTransfer(transferId);
 
     if(!m_connectionManager->sendFileAbortRequest(transferId,reason)){
@@ -408,6 +413,8 @@ void FileTransferManager::handleFileEndReceived(const QString &transferId)
     file->close();
     file->deleteLater();
     m_incomingTransfers.erase(transferIt);
+    qInfo() << "Incoming file transfer completed:"
+            << transferId << filePath;
     emit fileReceiveCompleted(filePath);
 
     if(!m_connectionManager->sendFileCompleteRequest(transferId)){
@@ -420,13 +427,15 @@ void FileTransferManager::handleFileCompleteReceived(const QString &transferId)
     if(m_sendState==SendState::Finishing
         &&m_sendTransferId==transferId){
 
+        qInfo() << "Outgoing file transfer completed:" << transferId;
         resetSendTransfer();
     }
 }
 
 void FileTransferManager::handleFileAbortReceived(const QString &transferId, Protocol::FileAbortReason reason)
 {
-    Q_UNUSED(reason);
+    qWarning() << "File transfer aborted by peer or server:"
+               << transferId << "reason" << static_cast<int>(reason);
 
     /*
      * 当前 Client 是该 transfer 的 Sender。

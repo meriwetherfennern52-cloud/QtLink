@@ -5,12 +5,31 @@
 
 DatabaseManager::DatabaseManager(const QString &databasePath)
     :m_databasePath(databasePath)
+    ,m_connectionName(QStringLiteral("QtLink_%1")
+          .arg(reinterpret_cast<quintptr>(this),0,16))
 {
+}
+
+DatabaseManager::~DatabaseManager()
+{
+    if(!m_database.isValid()){
+        return;
+    }
+
+    m_database.close();
+    m_database=QSqlDatabase();
+    QSqlDatabase::removeDatabase(m_connectionName);
 }
 
 bool DatabaseManager::initialize(QString &errorMessage)
 {
-    m_database=QSqlDatabase::addDatabase("QSQLITE");
+    if(m_database.isOpen()){
+        return true;
+    }
+
+    if(!m_database.isValid()){
+        m_database=QSqlDatabase::addDatabase("QSQLITE",m_connectionName);
+    }
     m_database.setDatabaseName(m_databasePath);
     if(!m_database.open()){
         errorMessage=m_database.lastError().text();

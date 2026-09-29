@@ -26,6 +26,11 @@ public:
     explicit DatabaseManager(const QString &databasePath);
 
     /**
+     * @brief 关闭并移除当前实例使用的数据库连接。
+     */
+    ~DatabaseManager();
+
+    /**
      * @brief 打开数据库并创建项目所需的数据表。
      *
      * @param errorMessage 初始化失败时返回错误信息。
@@ -62,6 +67,7 @@ private:
     bool createTables(QString &errorMessage);
 
     QString m_databasePath;
+    QString m_connectionName;
     QSqlDatabase m_database;
 };
 
